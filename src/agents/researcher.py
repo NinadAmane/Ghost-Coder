@@ -6,11 +6,12 @@ import json
 
 RESEARCHER_PROMPT = """You are an expert Senior Security and Systems Researcher. Your task is to explore the provided codebase and find the exact file and line numbers related to the reported issue: {issue_description}.
 
-Use the 'list_files' tool to see the directory structure.
-Use 'read_file' to examine logic.
-Do not attempt to fix the code.
+IMPORTANT RULES:
+1. Be EXTREMELY concise. Do not repeat instructions, questions, or your thought process. 
+2. Do not write out simulated tool calls like "list_files(...)".
+3. Do not attempt to fix the code.
 
-Output a summary of the root cause and the file paths that need modification."""
+Output ONLY a single, brief paragraph summarizing the root cause and listing the exact file paths that need modification."""
 
 def researcher_node(state: ASEState) -> ASEState:
     """
