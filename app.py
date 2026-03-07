@@ -59,24 +59,37 @@ if st.button("Start Orchestration"):
             st.write("Entering Multi-Agent Graph...")
             
             final_state = None
-            for event in graph.stream(initial_state):
-                for node_name, node_state in event.items():
-                    with st.expander(f"⚙️ **{node_name.capitalize()} Agent** finished a step.", expanded=True):
-                        if node_name == "researcher":
-                            st.markdown("**🔍 Researcher Output:**")
-                            st.markdown(node_state.get("research_summary", ""))
-                        elif node_name == "coder":
-                            st.markdown("**💻 Coder Drafted Fix:**")
-                            st.code(node_state.get("code_fix", ""), language="python")
-                        elif node_name == "qa":
-                            st.markdown("**🧪 QA Results:**")
-                            if node_state.get("test_passed"):
-                                st.success("Test Passed!")
-                            else:
-                                st.error("Test Failed. Sending feedback to Coder...")
-                            st.code(node_state.get("test_logs", ""), language="bash")
-                            
-                    final_state = node_state
+            try:
+                for event in graph.stream(initial_state):
+                    for node_name, node_state in event.items():
+                        with st.expander(f"⚙️ **{node_name.capitalize()} Agent** finished a step.", expanded=True):
+                            if node_name == "researcher":
+                                st.markdown("**🔍 Researcher Output:**")
+                                st.markdown(node_state.get("research_summary", ""))
+                            elif node_name == "coder":
+                                st.markdown("**💻 Coder Drafted Fix:**")
+                                st.code(node_state.get("code_fix", ""), language="python")
+                            elif node_name == "qa":
+                                st.markdown("**🧪 QA Results:**")
+                                if node_state.get("test_passed"):
+                                    st.success("Test Passed!")
+                                else:
+                                    st.error("Test Failed. Sending feedback to Coder...")
+                                st.code(node_state.get("test_logs", ""), language="bash")
+                                
+                        final_state = node_state
+            except Exception as e:
+                import groq
+                import re
+                if isinstance(e, groq.RateLimitError):
+                    # Try to extract the retry time from the message
+                    match = re.search(r"try again in ([\d\.]+[ms]|\d+:\d+)", str(e))
+                    retry_time = match.group(1) if match else "a few minutes"
+                    st.warning(f"⏳ **Groq API Rate Limit Reached.** Please wait {retry_time} before trying again. The free tier allows limited tokens per day.")
+                else:
+                    st.error(f"An unexpected error occurred: {str(e)}")
+                status.update(label="Orchestration Stopped", state="error", expanded=True)
+                st.stop()
                     
             status.update(label="Orchestration Complete!", state="complete", expanded=False)
             
