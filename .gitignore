@@ -11,5 +11,9 @@ wheels/
 .env
 .workspace/
 
+# Testing
+.pytest_cache/
+*.log
+
 # IDE files
 .vscode/

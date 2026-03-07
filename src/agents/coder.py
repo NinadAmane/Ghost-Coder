@@ -3,6 +3,9 @@ from langchain_groq import ChatGroq
 from src.state import ASEState
 import json
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 CODER_PROMPT = """You are a World-Class Polyglot Software Engineer. Based on the Researcher's report: {research_summary}, implement a fix for the issue.
 
@@ -38,21 +41,37 @@ def coder_node(state: ASEState) -> ASEState:
     try:
         # Use strict=False to handle literal newlines if a LLM makes a mistake
         modified_files = json.loads(content, strict=False)
+        
+        # Basic structured validation: ensure it's a dict mapping strings to strings
+        if not isinstance(modified_files, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in modified_files.items()):
+            raise ValueError("Output JSON must be a dictionary mapping file paths to file contents.")
+
         state["code_fix"] = response.content # Store raw for UI
         state["modified_files_content"] = modified_files
         
         # Apply fixes to disk
         repo_path = state.get("repo_path", "")
         if repo_path:
+            abs_repo_path = os.path.abspath(repo_path)
             for rel_path, file_content in modified_files.items():
-                abs_path = os.path.join(repo_path, rel_path)
+                
+                # Prevent absolute path traversal
+                rel_path = rel_path.replace('\\', '/').lstrip('/')
+                    
+                abs_path = os.path.abspath(os.path.join(abs_repo_path, rel_path))
+                
+                # Check path traversal
+                if not abs_path.startswith(abs_repo_path + os.sep) and abs_path != abs_repo_path:
+                    logger.warning(f"Path traversal attempt detected and blocked: {rel_path}")
+                    continue
+                    
                 os.makedirs(os.path.dirname(abs_path), exist_ok=True)
                 with open(abs_path, 'w', encoding='utf-8') as f:
                     f.write(file_content)
-                print(f"Applied fix to {abs_path}")
+                logger.info(f"Applied fix to {abs_path}")
                 
     except Exception as e:
-        print(f"Error parsing coder output: {e}\nContent: {content}")
+        logger.error(f"Error parsing coder output: {e}\nContent: {content}")
         state["code_fix"] = f"Error: Failed to parse or apply code fix JSON: {str(e)}"
         state["modified_files_content"] = {}
 

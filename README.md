@@ -96,6 +96,6 @@ uv run streamlit run app.py
 
 ## 🤝 Credits
 
-Developed with ❤️ by **Ninad Amane**.
+Built by **Ninad Amane**.
 
 _Transforming software development through agentic intelligence._
