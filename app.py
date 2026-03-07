@@ -103,7 +103,9 @@ if st.button("Start Orchestration"):
                                 st.error(pr_url)
                 else:
                     st.error(f"❌ Tests failed after {final_state.get('validation_attempts')} attempts.")
+                
                 if final_state.get("test_logs"):
+                    st.subheader("Test Execution Logs")
                     st.code(final_state.get("test_logs"), language="bash")
                     
         if not final_state.get("test_passed"):

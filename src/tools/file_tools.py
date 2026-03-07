@@ -46,3 +46,20 @@ def read_file(file_path: str) -> str:
             return "".join(numbered_lines)
     except Exception as e:
         return f"Error reading file '{file_path}': {str(e)}"
+
+@tool
+def apply_write_file(file_path: str, content: str) -> str:
+    """
+    Writes content to a file. Useful for applying code fixes.
+    
+    Args:
+        file_path: The absolute path to the file to write.
+        content: The new content of the file.
+    """
+    try:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return f"Successfully wrote to {file_path}"
+    except Exception as e:
+        return f"Error writing to file '{file_path}': {str(e)}"
