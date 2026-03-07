@@ -1,4 +1,4 @@
-# Ghost Coder | Ghost Coder: Multi-Agent Orchestrator for Git Issues
+# Ghost Coder | Multi-Agent Orchestrator for Git Issues
 
 ![Version](https://img.shields.io/badge/version-1.2.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11+-yellow)
