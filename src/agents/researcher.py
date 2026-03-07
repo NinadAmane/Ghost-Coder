@@ -34,10 +34,8 @@ def researcher_node(state: ASEState) -> ASEState:
     # Bind file reading and search tools
     tools = [list_files, read_file, search_codebase]
     
-    prompt = RESEARCHER_PROMPT.format(issue_description=state.get("issue_description", ""))
-    
     # Create the ReAct agent which handles the recursive tool-calling loop internally
-    react_agent = create_react_agent(llm, tools=tools, state_modifier=prompt)
+    react_agent = create_react_agent(llm, tools=tools, prompt=prompt)
     
     human_msg = HumanMessage(content=f"Please analyze the repository at {state.get('repo_path')} for the issue. You must use your tools to actively read the codebase before giving an answer.")
     

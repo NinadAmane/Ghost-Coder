@@ -63,9 +63,7 @@ def qa_node(state: ASEState) -> ASEState:
         status_str = "PASSED" if qa_results["test_passed"] else "FAILED"
         return f"Test Execution {status_str}.\nLogs:\n{qa_results['test_logs']}"
 
-    prompt = QA_PROMPT.format(code_fix=state.get("code_fix", ""))
-    
-    react_agent = create_react_agent(llm, tools=[run_test_in_sandbox], state_modifier=prompt)
+    react_agent = create_react_agent(llm, tools=[run_test_in_sandbox], prompt=prompt)
     
     human_msg = HumanMessage(content="Please write a unit test to verify my code fix, and execute it using the sandbox tool.")
     
