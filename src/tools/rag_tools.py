@@ -2,7 +2,6 @@ import os
 from langchain_core.tools import tool
 from langchain_chroma import Chroma
 from langchain_community.document_loaders.generic import GenericLoader
-from langchain_community.document_loaders.parsers import LanguageParser
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 import logging
@@ -28,8 +27,7 @@ def get_or_create_vector_store(repo_path: str) -> Chroma:
         repo_path,
         glob="**/*",
         suffixes=[".py", ".rs", ".js", ".ts", ".md"],
-        exclude=["**/__pycache__", "**/.venv", "**/venv", "**/.git", "**/node_modules"],
-        parser=LanguageParser()
+        exclude=["**/__pycache__", "**/.venv", "**/venv", "**/.git", "**/node_modules"]
     )
     docs = loader.load()
     

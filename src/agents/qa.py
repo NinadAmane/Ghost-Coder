@@ -21,7 +21,10 @@ You MUST provide the 'test_code' and an appropriate 'file_name' (like 'test_fix.
 You may also provide a 'custom_command' if the default test runner for the language is not sufficient.
 
 If the test fails, use your reflection skills to summarize WHY it failed based on the logs, and explicitly state that it failed.
-If the test passes, confirm the fix is ready for a Pull Request."""
+If the test passes, confirm the fix is ready for a Pull Request.
+
+CRITICAL TOOL FORMATTING:
+Do NOT output any tool calls using XML format or tags like `<function=...>`. You MUST use the native JSON tool calling format expected by the system. Never write raw `<function>` tags."""
 
 def qa_node(state: ASEState) -> ASEState:
     """
@@ -63,6 +66,8 @@ def qa_node(state: ASEState) -> ASEState:
         status_str = "PASSED" if qa_results["test_passed"] else "FAILED"
         return f"Test Execution {status_str}.\nLogs:\n{qa_results['test_logs']}"
 
+    prompt = QA_PROMPT.format(code_fix=state.get("code_fix", ""))
+    
     react_agent = create_react_agent(llm, tools=[run_test_in_sandbox], prompt=prompt)
     
     human_msg = HumanMessage(content="Please write a unit test to verify my code fix, and execute it using the sandbox tool.")
