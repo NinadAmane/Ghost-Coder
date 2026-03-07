@@ -1,10 +1,17 @@
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_groq import ChatGroq
+from langgraph.prebuilt import create_react_agent
 from src.state import ASEState
 from src.tools.file_tools import list_files, read_file
+from src.tools.rag_tools import search_codebase
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 RESEARCHER_PROMPT = """You are an expert Senior Security and Systems Researcher. Your task is to explore the provided codebase and find the exact file and line numbers related to the reported issue: {issue_description}.
+
+You have access to tools to read the file system and perform semantic search across the codebase. Use them iteratively to find the exact code that needs fixing!
 
 ### MANDATORY REPORT GUIDELINES:
 1. **Elaborate Analysis**: Provide a deep-dive into the codebase logic. Do not be brief.
@@ -19,30 +26,31 @@ Do not repeat instructions or your internal thought process. Output your finding
 def researcher_node(state: ASEState) -> ASEState:
     """
     Researcher node to analyze the repository and find the root cause of an issue.
+    Uses a ReAct agent loop to iteratively call file-reading tools.
     """
+    logger.info("Initializing Researcher ReAct Agent...")
     llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
     
-    # Bind file reading tools
-    tools = [list_files, read_file]
-    llm_with_tools = llm.bind_tools(tools)
+    # Bind file reading and search tools
+    tools = [list_files, read_file, search_codebase]
     
     prompt = RESEARCHER_PROMPT.format(issue_description=state.get("issue_description", ""))
     
-    # For a real implementation, we would use an AgentExecutor or loop to handle
-    # intermediate tool calls. Here we do an initial pass for demonstration.
-    messages = [
-        SystemMessage(content=prompt),
-        HumanMessage(content=f"Please analyze the repository at {state.get('repo_path')} for the issue.\n\nYou have access to the following tools: 'list_files', 'read_file'.")
-    ]
+    # Create the ReAct agent which handles the recursive tool-calling loop internally
+    react_agent = create_react_agent(llm, tools=tools, state_modifier=prompt)
     
-    response = llm.invoke(messages)
+    human_msg = HumanMessage(content=f"Please analyze the repository at {state.get('repo_path')} for the issue. You must use your tools to actively read the codebase before giving an answer.")
     
-    # Normally we would loop and execute tool calls here.
-    # We will simulate the output logic based on final LLM generation.
+    logger.info("Researcher ReAct agent starting execution loop...")
+    # Invoke the agent graph. It will run until the LLM decides to stop calling tools and returns a final answer.
+    result = react_agent.invoke({"messages": [human_msg]})
     
-    state["research_summary"] = response.content if response.content else "Identified the issue via tool calls."
-    # We would parse actual files from response, hardcoding one for the prototype
-    state["files_to_modify"] = ["src/main.py"] 
+    # The final message in the state contains the agent's synthesized output
+    final_output = result["messages"][-1].content
+    
+    state["research_summary"] = final_output
     state["current_agent"] = "researcher"
+    
+    logger.info("Researcher ReAct agent finished.")
     
     return state

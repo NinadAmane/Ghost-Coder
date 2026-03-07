@@ -59,3 +59,51 @@ class GitHubIntegration:
             return pr.html_url
         except Exception as e:
             return f"Error creating PR: {str(e)}"
+            
+    def commit_and_push_changes(self, repo_dir: str, branch_name: str, commit_message: str) -> bool:
+        """
+        Commits all local changes in the repository and pushes them to a new branch.
+        """
+        if not self.token:
+            print("Cannot push: GITHUB_TOKEN is not set.")
+            return False
+            
+        try:
+            # We configure git minimally in case it's a fresh docker container
+            subprocess.run(['git', 'config', 'user.email', 'ghost-coder@example.com'], cwd=repo_dir, check=True)
+            subprocess.run(['git', 'config', 'user.name', 'Ghost Coder Bot'], cwd=repo_dir, check=True)
+            
+            # Checkout new branch
+            subprocess.run(['git', 'checkout', '-b', branch_name], cwd=repo_dir, check=True)
+            
+            # Add and commit
+            subprocess.run(['git', 'add', '.'], cwd=repo_dir, check=True)
+            
+            # We allow empty commits just in case, though ideally there are changes
+            subprocess.run(['git', 'commit', '--allow-empty', '-m', commit_message], cwd=repo_dir, check=True)
+            
+            # Formulate the push URL with the token
+            # Note: repo_dir basename is the generic owner_repo folder, but we actually 
+            # need the github origin url. We can get it from git config.
+            origin_url_bytes = subprocess.check_output(['git', 'config', '--get', 'remote.origin.url'], cwd=repo_dir)
+            origin_url = origin_url_bytes.decode('utf-8').strip()
+            
+            # origin_url format: https://github.com/owner/repo.git
+            if origin_url.startswith("https://"):
+                auth_url = origin_url.replace("https://", f"https://x-access-token:{self.token}@")
+            else:
+                auth_url = origin_url
+                
+            # Push
+            push_cmd = ['git', 'push', '-u', auth_url, branch_name]
+            # Use capture_output to avoid leaking the token to stdout blindly
+            result = subprocess.run(push_cmd, cwd=repo_dir, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(f"Failed to push branch. Error: {result.stderr.replace(self.token, '***')}")
+                return False
+                
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to commit/push repository: {e}")
+            return False
