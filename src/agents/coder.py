@@ -10,11 +10,13 @@ logger = logging.getLogger(__name__)
 CODER_PROMPT = """You are a World-Class Polyglot Software Engineer. Based on the Researcher's report: {research_summary}, implement a fix for the issue.
 
 IMPORTANT RULES:
-1. Output ONLY a valid JSON object. 
-2. Format: {{"path/to/file.ext": "full file content here"}}
-3. CRITICAL: Use '\\n' for newlines inside the JSON string. Do NOT use literal newlines.
-4. Ensure the syntax is correct for the target language (Rust, Python, Node, etc.).
-5. Do not include any conversational filler."""
+1. First, provide a brief explanation of the changes you are making and your thought process.
+2. Then, output the exact file modifications as a valid JSON object enclosed in a ```json code block.
+3. JSON Format: {{"path/to/file.ext": "full file content here"}}
+4. CRITICAL: Use '\\n' for newlines inside the JSON string. Do NOT use literal newlines.
+5. EXTREMELY IMPORTANT: You MUST generate the FULL, COMPLETE, and CORRECT implementation. DO NOT generate placeholder functions, DO NOT use `pass`, DO NOT add comments like `# Actual implementation goes here`. You must write the actual, working code that fixes the issue.
+6. Ensure the syntax is correct for the target language.
+7. Do not include any conversational filler outside of the initial explanation."""
 
 def coder_node(state: ASEState) -> ASEState:
     """

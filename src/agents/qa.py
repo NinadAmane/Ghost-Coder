@@ -24,7 +24,9 @@ If the test fails, use your reflection skills to summarize WHY it failed based o
 If the test passes, confirm the fix is ready for a Pull Request.
 
 CRITICAL TOOL FORMATTING:
-Do NOT output any tool calls using XML format or tags like `<function=...>`. You MUST use the native JSON tool calling format expected by the system. Never write raw `<function>` tags."""
+You must invoke tools **natively** via the API.
+DO NOT write tool calls in your text output! Do NOT write XML tags like `<function=...>`. Do NOT write raw JSON strings representing tools.
+Just invoke the tool natively and wait for the response."""
 
 def qa_node(state: ASEState) -> ASEState:
     """
@@ -75,12 +77,22 @@ def qa_node(state: ASEState) -> ASEState:
     logger.info("QA ReAct agent starting execution loop...")
     result = react_agent.invoke({"messages": [human_msg]})
     
+    # Llama 3 sometimes only outputs the tool call and stops.
+    # If the last message is an AIMessage with tool calls and no text, it looks like a JSON blob in string output.
+    # We must explicitly read from the `qa_results` object because the ReAct loop doesn't enforce a final summary.
     final_output = result["messages"][-1].content
+    if not final_output.strip() and result["messages"][-1].tool_calls:
+        tool_call = result["messages"][-1].tool_calls[0]
+        final_output = f"Executed {tool_call['name']}."
+    if "{\"type\": \"function\"" in final_output or "tool_calls" in final_output:
+        # It's echoing raw json instead of reasoning
+        final_output = "The LLM outputted raw tool JSON instead of a readable reflection."
     
     # Update global state with the trapped variables from the tool
     state["test_passed"] = qa_results["test_passed"]
     state["test_file_path"] = qa_results["test_file_path"]
-    state["test_logs"] = final_output # The LLM's reflection on the logs
+    state["qa_reflection"] = final_output # The LLM's reflection on the logs
+    state["test_logs"] = qa_results["test_logs"] # The actual bash logs
     
     # If it failed, append the reflection back to the research summary so the Coder can see it next loop
     if not state["test_passed"]:

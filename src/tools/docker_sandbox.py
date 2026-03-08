@@ -4,8 +4,13 @@ from typing import Dict, Any
 
 class DockerSandbox:
     def __init__(self):
-        self.client = docker.from_env()
-        
+        try:
+            self.client = docker.from_env()
+            self.docker_available = True
+        except Exception as e:
+            self.client = None
+            self.docker_available = False
+            
     def detect_language(self, repo_dir: str) -> Dict[str, str]:
         """Detects the primary language of the repository to select the Docker image."""
         if os.path.exists(os.path.join(repo_dir, "Cargo.toml")):
@@ -20,21 +25,32 @@ class DockerSandbox:
         
     def run_tests(self, repo_dir: str, test_file_path: str = "", dependencies: list[str] = None, custom_command: str = "") -> Dict[str, Any]:
         """
-        Executes a test file inside an isolated Docker container based on the repo's language.
-        
-        Args:
-            repo_dir: The absolute path to the local repository code.
-            test_file_path: The relative path to the test file inside the repo.
-            dependencies: List of packages needed to run the tests (mostly for Python now).
-            custom_command: Overrides the default test execution command.
-            
-        Returns:
-            A dictionary containing 'success' boolean and 'logs' string.
+        Executes a test file inside an isolated Docker container based on the repo's language, 
+        with a fallback to local subprocess execution if Docker is unavailable.
         """
         abs_repo_dir = os.path.abspath(repo_dir)
         lang_config = self.detect_language(abs_repo_dir)
-        image = lang_config["image"]
         base_cmd = custom_command or lang_config["default_cmd"]
+        
+        if not self.docker_available:
+            import subprocess
+            try:
+                cmd = base_cmd
+                if test_file_path:
+                    cmd += f" {test_file_path}"
+                env = os.environ.copy()
+                if lang_config["language"] == "python":
+                    env["PYTHONPATH"] = abs_repo_dir
+                
+                result = subprocess.run(cmd, cwd=abs_repo_dir, shell=True, capture_output=True, text=True, timeout=120, env=env)
+                return {
+                    "success": result.returncode == 0,
+                    "logs": f"[WARNING: Docker unavailable. Ran test locally.]\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+                }
+            except Exception as e:
+                return {"success": False, "logs": f"Local run failed: {str(e)}"}
+
+        image = lang_config["image"]
         
         # Build command depending on language
         if lang_config["language"] == "python":
@@ -45,7 +61,6 @@ class DockerSandbox:
             cmd_target = f" {test_file_path}" if test_file_path else ""
             command = f"bash -c '{setup_deps} export PYTHONPATH=/workspace && {base_cmd}{cmd_target}'"
         else:
-            # For Rust/Node, we typically run the default suite or the custom command directly
             command = f"bash -c '{base_cmd}'"
         
         try:
@@ -58,7 +73,7 @@ class DockerSandbox:
                 detach=True
             )
             
-            result = container.wait(timeout=120) # Given Rust compiles might take longer, increased to 120
+            result = container.wait(timeout=120) 
             logs = container.logs().decode('utf-8')
             container.remove()
             

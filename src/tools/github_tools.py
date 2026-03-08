@@ -24,7 +24,8 @@ class GitHubIntegration:
         return {
             "title": issue.title,
             "body": issue.body,
-            "url": issue.html_url
+            "url": issue.html_url,
+            "state": issue.state
         }
 
     def clone_repository(self, clone_url: str, dest_dir: str) -> bool:
