@@ -1,103 +1,96 @@
-import os
 import argparse
-import logging
+import os
+import shutil
+import time
 from dotenv import load_dotenv
 from src.graph import create_ase_graph
+from src.tools.github_tools import GitHubTool
 
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s [%(levelname)s] %(name)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+load_dotenv()
 
 def main():
-    parser = argparse.ArgumentParser(description="Multi-Agent Software Engineering System")
-    parser.add_argument("--repo", type=str, help="The GitHub repository (e.g., owner/repo)")
-    parser.add_argument("--issue", type=int, help="The GitHub issue number")
+    parser = argparse.ArgumentParser(description="Simplified Stateful AI Agent")
+    parser.add_argument("issue_url", help="GitHub Issue URL to solve")
     args = parser.parse_args()
-
-    logger.info("Initializing ASE System...")
     
-    # Load environment variables from .env file
-    load_dotenv()
+    if not os.getenv("GITHUB_TOKEN") or not os.getenv("GROQ_API_KEY"):
+        print("Please ensure GITHUB_TOKEN and GROQ_API_KEY are set.")
+        return
+
+    print(f"Starting orchestration for: {args.issue_url}")
     
-    if not os.getenv("GROQ_API_KEY"):
-        logger.warning("GROQ_API_KEY is not set. Groq LLM calls will fail.")
-    if not os.getenv("GITHUB_TOKEN"):
-        logger.error("GITHUB_TOKEN is not set. GitHub API calls will fail.")
-        return
-
-    repo_name = args.repo or os.getenv("GITHUB_REPOSITORY")
-    issue_number_str = args.issue or os.getenv("ISSUE_NUMBER")
-
-    if not repo_name or not issue_number_str:
-        logger.error("Repository and issue number must be provided via CLI arguments (--repo, --issue) or environment variables (GITHUB_REPOSITORY, ISSUE_NUMBER).")
-        return
-
-    try:
-        issue_number = int(issue_number_str)
-    except ValueError:
-        logger.error("Issue number must be an integer.")
-        return
+    gh_tool = GitHubTool()
+    issue_details = gh_tool.fetch_issue_details(args.issue_url)
+    print(f"Issue Title: {issue_details['title']}")
+    
+    import time
+    import shutil
+    import stat
+    def remove_readonly(func, path, excinfo):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
         
-    logger.info(f"Welcome to the ASE System! Target: {repo_name}#{issue_number}")
-    
-    logger.info("Fetching issue details from GitHub...")
-    from src.tools.github_tools import GitHubIntegration
-    
-    github_client = GitHubIntegration()
-    try:
-        issue_data = github_client.get_issue_details(repo_name, issue_number)
-        logger.info(f"Issue Title: {issue_data['title']}")
-    except Exception as e:
-        logger.error(f"Failed to fetch issue: {e}")
+    workspace_dir = os.path.abspath("./.workspace/target_repo")
+    if os.path.exists(workspace_dir):
+        shutil.rmtree(workspace_dir, onerror=remove_readonly)
+    os.makedirs(workspace_dir, exist_ok=True)
+    print("Cloning repository...")
+    success = gh_tool.clone_repository(args.issue_url, workspace_dir)
+    if not success:
+        print("Failed to clone!")
         return
-        
-    logger.info("Cloning repository into local workspace...")
-    workspace_dir = os.path.abspath(f"./.workspace/{repo_name.replace('/', '_')}")
-    clone_url = f"https://github.com/{repo_name}.git"
-    
-    if not github_client.clone_repository(clone_url, workspace_dir):
-        logger.error("Failed to clone repository. Exiting.")
-        return
-        
+
+    # Initialize LangGraph State
+    initial_state = {
+        "issue_url": args.issue_url,
+        "issue_description": f"{issue_details['title']}\\n\\n{issue_details['body']}",
+        "repo_path": workspace_dir,
+        "files_to_modify": [],
+        "current_code": {},
+        "updated_code": {},
+        "error_history": [],
+        "test_passed": False,
+        "pr_url": ""
+    }
+
     graph = create_ase_graph()
     
-    initial_state = {
-        "github_issue_url": issue_data["url"],
-        "issue_description": f"{issue_data['title']}\n\n{issue_data['body']}",
-        "repo_path": workspace_dir,
-        "validation_attempts": 0
-    }
-    
-    logger.info(f"Starting multi-agent orchestration for issue #{issue_number}")
-    
-    # Execute graph
+    print("Entering Agent Graph...")
     final_state = None
-    for event in graph.stream(initial_state):
-        for node_name, node_state in event.items():
-            logger.info(f"--- Finished node: {node_name} ---")
-            final_state = node_state
+    try:
+        for output in graph.stream(initial_state):
+            for agent, state_update in output.items():
+                print(f"\n=====================================")
+                print(f"+++ Finished Node: {agent.upper()} +++")
+                
+                if agent == "researcher":
+                    print(f"Files selected to modify: {state_update.get('files_to_modify', [])}")
+                
+                elif agent == "coder":
+                    print("Updated Code generated by Coder:")
+                    updated = state_update.get("updated_code", {})
+                    for filepath, content in updated.items():
+                        print(f"\n--- {filepath} ---")
+                        print(content)
+                        
+                elif agent == "tester":
+                    passed = state_update.get("test_passed", False)
+                    print(f"Test Passed: {passed}")
+                    if not passed and state_update.get("error_history"):
+                        print(f"Latest Error Logs:\n{state_update['error_history'][-1]}")
+                        
+                print(f"=====================================\n")
+                
+            final_state = state_update
             
-    logger.info("="*50)
-    logger.info("Orchestration complete.")
-    
-    if final_state:
-        logger.info("[RESEARCHER SUMMARY]")
-        logger.info(final_state.get("research_summary", "None"))
-        
-        logger.info("[CODER DRAFTED FIX]")
-        logger.info(final_state.get("code_fix", "None"))
-        
-        logger.info("[QA TEST LOGS]")
-        logger.info(final_state.get("test_logs", "None"))
-        
-        if final_state.get("test_passed"):
-            logger.info("✅ Final Status: Tests PASSED. Ready for Pull Request.")
-        else:
-            logger.error(f"❌ Final Status: Tests FAILED after {final_state.get('validation_attempts')} attempts.")
-    logger.info("="*50)
+    except Exception as e:
+        print(f"Error executing graph: {e}")
+        return
+
+    if final_state and final_state.get("pr_url"):
+        print(f"Success! Pull Request opened at: {final_state['pr_url']}")
+    else:
+        print("Orchestration completed, but no PR was opened.")
 
 if __name__ == "__main__":
     main()

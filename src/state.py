@@ -1,28 +1,26 @@
+from typing import TypedDict, List
+from typing_extensions import Annotated
 import operator
-from typing import Annotated, TypedDict, List, Dict, Any
 
 class ASEState(TypedDict):
     """
-    Represents the state of our multi-agent orchestration graph.
+    State definition for the Simplified Autonomous Agent System.
+    Passes the Current Code and Error History between agents.
     """
-    github_issue_url: str
+    issue_url: str
     issue_description: str
     repo_path: str
     
     # Researcher Output
-    research_summary: str
     files_to_modify: List[str]
+    current_code: dict[str, str] # filepath -> content
     
     # Coder Output
-    code_fix: str
-    modified_files_content: Dict[str, str] # mapping of filepath -> new content
-    new_dependencies: List[str]
+    updated_code: dict[str, str] # filepath -> modified content
     
-    # QA Output
-    test_file_path: str
-    test_logs: str
+    # Tester Output
+    error_history: Annotated[list[str], operator.add]
     test_passed: bool
     
-    # Orchestrator
-    current_agent: str
-    validation_attempts: int
+    # PR Submitter
+    pr_url: str

@@ -1,94 +1,83 @@
 import docker
 import os
-from typing import Dict, Any
+import tarfile
+import io
 
 class DockerSandbox:
     def __init__(self):
-        try:
-            self.client = docker.from_env()
-            self.docker_available = True
-        except Exception as e:
-            self.client = None
-            self.docker_available = False
-            
-    def detect_language(self, repo_dir: str) -> Dict[str, str]:
-        """Detects the primary language of the repository to select the Docker image."""
-        if os.path.exists(os.path.join(repo_dir, "Cargo.toml")):
-            return {"language": "rust", "image": "rust:latest", "default_cmd": "cargo test"}
-        elif os.path.exists(os.path.join(repo_dir, "package.json")):
-            return {"language": "node", "image": "node:18", "default_cmd": "npm test"}
-        elif os.path.exists(os.path.join(repo_dir, "go.mod")):
-            return {"language": "go", "image": "golang:latest", "default_cmd": "go test ./..."}
-        else:
-            # Default to Python
-            return {"language": "python", "image": "python:3.11-slim", "default_cmd": "pytest"}
-        
-    def run_tests(self, repo_dir: str, test_file_path: str = "", dependencies: list[str] = None, custom_command: str = "") -> Dict[str, Any]:
-        """
-        Executes a test file inside an isolated Docker container based on the repo's language, 
-        with a fallback to local subprocess execution if Docker is unavailable.
-        """
-        abs_repo_dir = os.path.abspath(repo_dir)
-        lang_config = self.detect_language(abs_repo_dir)
-        base_cmd = custom_command or lang_config["default_cmd"]
-        
-        if not self.docker_available:
-            import subprocess
-            try:
-                cmd = base_cmd
-                if test_file_path:
-                    cmd += f" {test_file_path}"
-                env = os.environ.copy()
-                if lang_config["language"] == "python":
-                    env["PYTHONPATH"] = abs_repo_dir
-                
-                result = subprocess.run(cmd, cwd=abs_repo_dir, shell=True, capture_output=True, text=True, timeout=120, env=env)
-                return {
-                    "success": result.returncode == 0,
-                    "logs": f"[WARNING: Docker unavailable. Ran test locally.]\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
-                }
-            except Exception as e:
-                return {"success": False, "logs": f"Local run failed: {str(e)}"}
+        self.client = None
 
-        image = lang_config["image"]
-        
-        # Build command depending on language
-        if lang_config["language"] == "python":
-            setup_deps = ""
-            if dependencies:
-                deps_str = " ".join(dependencies)
-                setup_deps = f"pip install {deps_str} &&"
-            cmd_target = f" {test_file_path}" if test_file_path else ""
-            command = f"bash -c '{setup_deps} export PYTHONPATH=/workspace && {base_cmd}{cmd_target}'"
-        else:
-            command = f"bash -c '{base_cmd}'"
-        
+    def run_tests(self, repo_dir: str, test_file_path: str) -> dict:
+        """
+        Spins up a Python Docker container, mounts the code, runs the test script,
+        and returns the exit code and logs.
+        """
         try:
-            # Use auto_remove=False to capture logs, then remove manually
+            import docker
+            self.client = docker.from_env()
+        except Exception as e:
+            return {
+                "exit_code": -1,
+                "logs": f"SYSTEM ERROR: Docker daemon is not running. Please start Docker Desktop on your machine! Details: {str(e)}",
+                "success": False
+            }
+            
+        container = None
+        try:
+            # We use a lightweight python image
+            image = "python:3.11-slim"
+            
+            # Ensure the image is pulled
+            try:
+                self.client.images.get(image)
+            except docker.errors.ImageNotFound:
+                print(f"Pulling image {image}...")
+                self.client.images.pull(image)
+
+            # Spin up container
             container = self.client.containers.run(
                 image,
-                command=command,
-                volumes={abs_repo_dir: {'bind': '/workspace', 'mode': 'rw'}},
-                working_dir='/workspace',
-                detach=True
+                command="tail -f /dev/null", # Keep alive
+                detach=True,
+                working_dir="/workspace"
             )
+
+            # Copy files to container
+            self._copy_to_container(container, repo_dir, "/workspace")
+
+            # Execute the test
+            # test_file_path should be relative to repo_dir (e.g. "test_fix.py")
+            cmd = f"python {test_file_path}"
             
-            result = container.wait(timeout=120) 
-            logs = container.logs().decode('utf-8')
-            container.remove()
+            exit_code, output = container.exec_run(cmd)
+            
+            logs = output.decode('utf-8')
             
             return {
-                "success": result["StatusCode"] == 0,
-                "logs": logs
+                "exit_code": exit_code,
+                "logs": logs,
+                "success": exit_code == 0
             }
-            
-        except docker.errors.ContainerError as e:
-            return {
-                "success": False,
-                "logs": e.stderr.decode('utf-8') if e.stderr else str(e)
-            }
+
         except Exception as e:
             return {
-                "success": False,
-                "logs": f"Sandbox Error: {str(e)}"
+                "exit_code": -1,
+                "logs": str(e),
+                "success": False
             }
+        finally:
+            if container:
+                container.stop()
+                container.remove()
+
+    def _copy_to_container(self, container, src_path: str, dest_path: str):
+        """
+        Helper to copy an entire directory into a docker container
+        """
+        tar_stream = io.BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+            # Add the directory contents but strip the top level folder from the archive path
+            tar.add(src_path, arcname='.')
+        
+        tar_stream.seek(0)
+        container.put_archive(path=dest_path, data=tar_stream)

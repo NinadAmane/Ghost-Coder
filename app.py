@@ -1,192 +1,127 @@
 import streamlit as st
 import os
+import time
 from dotenv import load_dotenv
 from src.graph import create_ase_graph
-from src.tools.github_tools import GitHubIntegration
+from src.tools.github_tools import GitHubTool
 
 load_dotenv()
 
-st.set_page_config(page_title="Ghost Coder", layout="wide")
+st.set_page_config(page_title="Ghost Coder ", layout="centered")
 
-st.title("Ghost Coder: Multi-Agent Orchestrator for Git Issues")
-st.markdown("This system utilizes LangGraph and Groq's APIs to dynamically pull GitHub issues and route them through virtual *Researcher*, *Coder*, and *QA* agents.")
+st.title("Ghost Coder")
+st.markdown("A 4-node LangGraph pipeline that autonomously researches, codes, tests, and opens a PR for a GitHub Issue.")
 
-st.sidebar.header("Configuration")
-github_token = st.sidebar.text_input("GitHub Token", value=os.getenv("GITHUB_TOKEN", ""), type="password")
-groq_key = st.sidebar.text_input("Groq API Key", value=os.getenv("GROQ_API_KEY", ""), type="password")
+# Sidebar for credentials
+with st.sidebar:
+    st.header("Credentials")
+    github_token = st.text_input("GitHub Token", value=os.getenv("GITHUB_TOKEN", ""), type="password")
+    groq_key = st.text_input("Groq API Key", value=os.getenv("GROQ_API_KEY", ""), type="password")
+    
+    if github_token:
+        os.environ["GITHUB_TOKEN"] = github_token
+    if groq_key:
+        os.environ["GROQ_API_KEY"] = groq_key
 
-if github_token:
-    os.environ["GITHUB_TOKEN"] = github_token
-if groq_key:
-    os.environ["GROQ_API_KEY"] = groq_key
+# Main Interface
+issue_url = st.text_input("GitHub Issue URL", placeholder="https://github.com/owner/repo/issues/1")
 
-repo_name = st.text_input("Repository (e.g., owner/repo)", "langchain-ai/langchain")
-issue_number = st.number_input("Issue Number", min_value=1, value=1234, step=1)
+if st.button("Start Orchestration", type="primary"):
+    if not os.environ.get("GITHUB_TOKEN") or not os.environ.get("GROQ_API_KEY"):
+        st.error("Please provide both GitHub and Groq API keys in the sidebar.")
+        st.stop()
+        
+    if not issue_url:
+        st.error("Please enter a valid GitHub Issue URL.")
+        st.stop()
 
-if st.button("Start Orchestration"):
-    if not github_token or not groq_key:
-        st.error("Please configure your API keys in the sidebar.")
-    else:
-        with st.status("Initializing Ghost Coder...", expanded=True) as status:
-            st.write("Fetching issue details from GitHub...")
-            github_client = GitHubIntegration()
+    with st.status("Initializing...", expanded=True) as status:
+        st.write("Fetching issue details...")
+        try:
+            gh_tool = GitHubTool()
+            issue_details = gh_tool.fetch_issue_details(issue_url)
+            st.success(f"Found Issue: **{issue_details['title']}**")
+        except Exception as e:
+            status.update(label="Failed to fetch issue", state="error")
+            st.error(str(e))
+            st.stop()
+
+        import shutil
+        import stat
+        def remove_readonly(func, path, excinfo):
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
             
-            try:
-                issue_data = github_client.get_issue_details(repo_name, issue_number)
-                st.write(f"**Issue Title:** {issue_data['title']}")
-                
-                if issue_data.get("state", "open").lower() == "closed":
-                    st.warning(f"⚠️ **Notice:** Issue #{issue_number} has already been marked as closed/solved on GitHub. Please try a different issue.")
-                    status.update(label="Orchestration Stopped", state="error", expanded=True)
-                    st.stop()
-                    
-            except Exception as e:
-                st.error(f"Failed to fetch issue: {e}")
-                st.stop()
-                
-            st.write(f"Cloning repository `{repo_name}` into local workspace...")
-            workspace_dir = os.path.abspath(f"./.workspace/{repo_name.replace('/', '_')}")
-            clone_url = f"https://github.com/{repo_name}.git"
-            
-            if not github_client.clone_repository(clone_url, workspace_dir):
-                st.error("Failed to clone repository.")
-                st.stop()
-                
-            st.write("Initializing LangGraph orchestrator...")
-            graph = create_ase_graph()
-            
-            initial_state = {
-                "github_issue_url": issue_data["url"],
-                "issue_description": f"{issue_data['title']}\n\n{issue_data['body']}",
-                "repo_path": workspace_dir,
-                "validation_attempts": 0
-            }
-            
-            st.write("Entering Multi-Agent Graph...")
-            
-            final_state = None
-            try:
-                for event in graph.stream(initial_state):
-                    for node_name, node_state in event.items():
-                        with st.expander(f"⚙️ **{node_name.capitalize()} Agent** finished a step.", expanded=True):
-                            if node_name == "researcher":
-                                st.markdown("**🔍 Researcher Output:**")
-                                st.markdown(node_state.get("research_summary", ""))
-                            elif node_name == "coder":
-                                st.markdown("**💻 Coder Drafted Fix:**")
-                                code_fix_text = node_state.get("code_fix", "")
-                                if "```json" in code_fix_text:
-                                    explanation = code_fix_text.split("```json")[0]
-                                    if explanation.strip():
-                                        st.markdown(explanation)
+        workspace_dir = os.path.abspath("./.workspace/target_repo")
+        if os.path.exists(workspace_dir):
+            shutil.rmtree(workspace_dir, onerror=remove_readonly)
+        os.makedirs(workspace_dir, exist_ok=True)
+        
+        st.write("Cloning repository into isolated workspace...")
+        if not gh_tool.clone_repository(issue_url, workspace_dir):
+            status.update(label="Clone failed", state="error")
+            st.error("Failed to clone repository. Check your token permissions.")
+            st.stop()
+
+        initial_state = {
+            "issue_url": issue_url,
+            "issue_description": f"{issue_details['title']}\\n\\n{issue_details['body']}",
+            "repo_path": workspace_dir,
+            "files_to_modify": [],
+            "current_code": {},
+            "updated_code": {},
+            "error_history": [],
+            "test_passed": False,
+            "pr_url": ""
+        }
+
+        st.write("Building Graph...")
+        graph = create_ase_graph()
+        
+        st.write("Starting Agent Loop...")
+        status.update(label="Agents Running...")
+
+    final_state = None
+    
+    # We create empty placeholders to dynamically render agent outputs
+    st.markdown("### Agent Live Output")
+    stream_container = st.container()
+    
+    try:
+        for output in graph.stream(initial_state):
+            for agent, state_update in output.items():
+                with stream_container:
+                    with st.expander(f"⚙️ Node Finished: **{agent.upper()}**", expanded=True):
+                        if agent == "researcher":
+                            st.write("**Files targeted for modification:**")
+                            st.write(state_update.get('files_to_modify', []))
+                            
+                        elif agent == "coder":
+                            st.write("**Code Fix Generated:**")
+                            updated = state_update.get("updated_code", {})
+                            for filepath, content in updated.items():
+                                st.markdown(f"**`{filepath}`**")
+                                st.code(content, language="python")
                                 
-                                modified_files = node_state.get("modified_files_content", {})
-                                for file_path, content in modified_files.items():
-                                    with st.expander(f"Modified: {file_path}", expanded=True):
-                                        st.code(content, language="python")
-
-                            elif node_name == "qa":
-                                st.markdown("**🧪 QA Results:**")
-                                if node_state.get("test_passed"):
-                                    st.success("Test Passed!")
-                                else:
-                                    st.error("Test Failed. Sending feedback to Coder...")
-                                
-                                if node_state.get("qa_reflection"):
-                                    st.markdown(node_state.get("qa_reflection"))
+                        elif agent == "tester":
+                            passed = state_update.get("test_passed", False)
+                            if passed:
+                                st.success("✅ Sandbox Test Passed!")
+                            else:
+                                st.error("❌ Sandbox Test Failed! Sending logs back to Coder.")
+                                if state_update.get("error_history"):
+                                    st.code(state_update["error_history"][-1])
                                     
-                                if node_state.get("test_logs"):
-                                    with st.expander("View Raw Test Logs"):
-                                        st.code(node_state.get("test_logs", ""), language="bash")
-                                
-                        final_state = node_state
-            except Exception as e:
-                import groq
-                import re
-                if isinstance(e, groq.RateLimitError):
-                    # Try to extract the retry time from the message
-                    match = re.search(r"try again in ([\d\.]+[ms]|\d+:\d+)", str(e))
-                    retry_time = match.group(1) if match else "a few minutes"
-                    st.warning(f"⏳ **Groq API Rate Limit Reached.** Please wait {retry_time} before trying again. The free tier allows limited tokens per day.")
-                else:
-                    st.error(f"An unexpected error occurred: {str(e)}")
-                status.update(label="Orchestration Stopped", state="error", expanded=True)
-                st.stop()
-                    
-            status.update(label="Orchestration Complete!", state="complete", expanded=False)
+            final_state = state_update
             
-            # Store in session state to persist across UI reruns
-            st.session_state.final_state = final_state
-            st.session_state.workspace_dir = workspace_dir
-            
-if st.session_state.get("final_state"):
-    final_state = st.session_state.final_state
-    workspace_dir = st.session_state.workspace_dir
-    st.subheader("Agent Outputs")
-    
-    tab1, tab2, tab3 = st.tabs(["Researcher Report", "Coder Fix", "QA Results"])
-    
-    with tab1:
-        st.markdown(final_state.get("research_summary", "No report generated."))
-        
-    with tab2:
-        code_fix_text = final_state.get("code_fix", "No fix generated.")
-        if "```json" in code_fix_text:
-            explanation = code_fix_text.split("```json")[0]
-            if explanation.strip():
-                st.markdown(explanation)
-        elif code_fix_text != "No fix generated.":
-            st.markdown(code_fix_text)
-            
-        modified_files = final_state.get("modified_files_content", {})
-        if not modified_files and code_fix_text == "No fix generated.":
-            st.write("No fix generated.")
-        else:
-            for file_path, content in modified_files.items():
-                with st.expander(f"File: {file_path}", expanded=True):
-                    st.code(content, language="python")
-        
-    with tab3:
-        if final_state.get("test_passed"):
-            st.success("✅ All tests passed in Docker Sandbox.")
-            st.markdown("---")
-            st.subheader("🚢 Ready for Deployment")
-            st.write("The QA agent has verified the fix. You can now submit this automated fix back to the repository.")
-            
-            pr_title = st.text_input("PR Title", value=f"Fix for Issue #{issue_number}")
-            pr_branch = st.text_input("Branch Name", value=f"ghost-coder/fix-issue-{issue_number}")
-            
-            if st.button("Submit Pull Request"):
-                with st.spinner("Pushing code and Creating Pull Request on GitHub..."):
-                    github_client = GitHubIntegration()
-                    push_success = github_client.commit_and_push_changes(
-                        repo_dir=workspace_dir,
-                        branch_name=pr_branch,
-                        commit_message=pr_title
-                    )
-                    
-                    if not push_success:
-                        st.error("Failed to push local changes to GitHub branch.")
-                    else:
-                        pr_url = github_client.create_pull_request(
-                            repo_name=repo_name,
-                            branch_name=pr_branch,
-                            title=pr_title,
-                            body=f"Automated fix generated by Ghost Coder for issue #{issue_number}.\n\n"
-                        )
-                        if pr_url.startswith("http"):
-                            st.success(f"Pull Request successfully created! [View PR here]({pr_url})")
-                            st.balloons()
-                        else:
-                            st.error(pr_url)
+    except Exception as e:
+        import traceback
+        st.error("Graph Execution Failed")
+        st.code(traceback.format_exc())
+        st.stop()
 
-        else:
-            st.error(f"❌ Tests failed after {final_state.get('validation_attempts')} attempts.")
-        
-        if final_state.get("qa_reflection"):
-            st.markdown(final_state.get("qa_reflection"))
-            
-        if final_state.get("test_logs"):
-            st.subheader("Test Execution Logs")
-            with st.expander("View Raw Test Logs"):
-                st.code(final_state.get("test_logs"), language="bash")
+    if final_state and final_state.get("pr_url"):
+        st.balloons()
+        st.success(f"🎉 **Success!** Pull Request autonomously opened: [View PR]({final_state['pr_url']})")
+    else:
+        st.warning("Orchestration completed, but no Pull Request was opened.")

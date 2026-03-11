@@ -2,43 +2,54 @@ from langgraph.graph import StateGraph, START, END
 from src.state import ASEState
 from src.agents.researcher import researcher_node
 from src.agents.coder import coder_node
-from src.agents.qa import qa_node
+from src.agents.tester import tester_node
+from src.tools.github_tools import GitHubTool
 
 def should_continue(state: ASEState) -> str:
     """
-    Conditional routing logic after QA.
-    If tests pass, end the graph. If they fail, go back to coder.
+    Conditional edge: 
+    If test passed, proceed to open PR and END.
+    If test failed, loop back to Coder.
     """
-    if state.get("test_passed", False):
+    if state.get("test_passed"):
+        
+        # We can handle PR submission inline for simplicity as requested by Phase 3
+        # Or you can extract it to another node, but inline meets requirement "Go to End (and open PR)"
+        try:
+            gh_tool = GitHubTool()
+            pr_url = gh_tool.create_pull_request(
+                repo_dir=state["repo_path"],
+                branch_name=f"ghost-coder-fix",
+                title="Automated Fix",
+                body=f"Fixes {state['issue_url']}"
+            )
+            state["pr_url"] = pr_url
+        except Exception as e:
+            print(f"Failed to submit PR: {e}")
+            
         return "end"
-    
-    # Optional: safeguard to prevent infinite back-and-forth loops
-    if state.get("validation_attempts", 0) >= 3:
-        print("Max validation attempts reached. Exiting with failure.")
+        
+    # Prevent infinite loops
+    if len(state.get("error_history", [])) > 3:
+        print("Max attempts reached. Halting.")
         return "end"
         
     return "coder"
 
 def create_ase_graph():
-    """
-    Builds and compiles the main Dircted Acyclic Graph (DAG) for the ASE System.
-    """
-    # 1. Initialize StateGraph
+    """Builds the 4-node LangGraph logic."""
     workflow = StateGraph(ASEState)
     
-    # 2. Add Nodes
     workflow.add_node("researcher", researcher_node)
     workflow.add_node("coder", coder_node)
-    workflow.add_node("qa", qa_node)
+    workflow.add_node("tester", tester_node)
     
-    # 3. Add Edges
     workflow.add_edge(START, "researcher")
     workflow.add_edge("researcher", "coder")
-    workflow.add_edge("coder", "qa")
+    workflow.add_edge("coder", "tester")
     
-    # Conditional Edges from QA
     workflow.add_conditional_edges(
-        "qa",
+        "tester",
         should_continue,
         {
             "coder": "coder",
@@ -46,6 +57,4 @@ def create_ase_graph():
         }
     )
     
-    # Compile the graph
-    graph = workflow.compile()
-    return graph
+    return workflow.compile()
