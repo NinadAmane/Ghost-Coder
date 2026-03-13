@@ -1,192 +1,162 @@
 import streamlit as st
 import os
-from dotenv import load_dotenv
+import time
 from src.graph import create_ase_graph
-from src.tools.github_tools import GitHubIntegration
+from src.tools.github_tools import GitHubTool
+from dotenv import load_dotenv
 
+# Load env but also allow manual override in sidebar
 load_dotenv()
 
-st.set_page_config(page_title="Ghost Coder", layout="wide")
+st.set_page_config(
+    page_title="Ghost Coder | Autonomous Agent",
+    page_icon="👻",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("Ghost Coder: Multi-Agent Orchestrator for Git Issues")
-st.markdown("This system utilizes LangGraph and Groq's APIs to dynamically pull GitHub issues and route them through virtual *Researcher*, *Coder*, and *QA* agents.")
+# --- Custom Styling ---
+st.markdown("""
+<style>
+    .main {
+        background-color: #0e1117;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        height: 3em;
+        background-color: #4b0082;
+        color: white;
+        font-weight: bold;
+    }
+    .stButton>button:hover {
+        background-color: #6a0dad;
+        border: 1px solid #9370db;
+    }
+    .agent-card {
+        padding: 1.5rem;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 1rem;
+    }
+    .status-text {
+        font-size: 0.9rem;
+        color: #888;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-st.sidebar.header("Configuration")
-github_token = st.sidebar.text_input("GitHub Token", value=os.getenv("GITHUB_TOKEN", ""), type="password")
-groq_key = st.sidebar.text_input("Groq API Key", value=os.getenv("GROQ_API_KEY", ""), type="password")
+# --- Sidebar Configuration ---
+with st.sidebar:
+    st.image("https://img.icons8.com/plasticine/100/000000/ghost.png", width=80)
+    st.title("Settings")
+    
+    st.markdown("### API Keys")
+    gh_token = st.text_input("GitHub Token", value=os.getenv("GITHUB_TOKEN", ""), type="password")
+    groq_key = st.text_input("Groq API Key", value=os.getenv("GROQ_API_KEY", ""), type="password")
+    
+    if gh_token: os.environ["GITHUB_TOKEN"] = gh_token
+    if groq_key: os.environ["GROQ_API_KEY"] = groq_key
+    
+    st.divider()
+    st.markdown("### 3-Agent Core")
+    st.info("Currently running in minimalist mode: Researcher -> Coder -> Tester")
 
-if github_token:
-    os.environ["GITHUB_TOKEN"] = github_token
-if groq_key:
-    os.environ["GROQ_API_KEY"] = groq_key
+# --- Main UI ---
+st.title("👻 Ghost Coder")
+st.markdown("#### Autonomous Software Engineering Orchestrator")
 
-repo_name = st.text_input("Repository (e.g., owner/repo)", "langchain-ai/langchain")
-issue_number = st.number_input("Issue Number", min_value=1, value=1234, step=1)
+col1, col2 = st.columns([2, 1])
 
-if st.button("Start Orchestration"):
-    if not github_token or not groq_key:
-        st.error("Please configure your API keys in the sidebar.")
-    else:
-        with st.status("Initializing Ghost Coder...", expanded=True) as status:
-            st.write("Fetching issue details from GitHub...")
-            github_client = GitHubIntegration()
+with col1:
+    issue_url = st.text_input("Issue URL", placeholder="https://github.com/owner/repo/issues/123")
+    
+    if st.button("🚀 Execute Autonomous Fix"):
+        if not issue_url:
+            st.warning("Please provide a GitHub Issue URL.")
+        elif not os.getenv("GITHUB_TOKEN") or not os.getenv("GROQ_API_KEY"):
+            st.error("Missing API keys. Please set them in the sidebar or .env file.")
+        else:
+            gh_tool = GitHubTool()
             
-            try:
-                issue_data = github_client.get_issue_details(repo_name, issue_number)
-                st.write(f"**Issue Title:** {issue_data['title']}")
+            with st.status("Initializing Environment...", expanded=True) as status:
+                st.write("🔍 Fetching issue metadata...")
+                issue_info = gh_tool.fetch_issue_details(issue_url)
                 
-                if issue_data.get("state", "open").lower() == "closed":
-                    st.warning(f"⚠️ **Notice:** Issue #{issue_number} has already been marked as closed/solved on GitHub. Please try a different issue.")
-                    status.update(label="Orchestration Stopped", state="error", expanded=True)
+                if "Error" in issue_info['title']:
+                    st.error(f"Failed to fetch issue: {issue_info['body']}")
                     st.stop()
-                    
-            except Exception as e:
-                st.error(f"Failed to fetch issue: {e}")
-                st.stop()
                 
-            st.write(f"Cloning repository `{repo_name}` into local workspace...")
-            workspace_dir = os.path.abspath(f"./.workspace/{repo_name.replace('/', '_')}")
-            clone_url = f"https://github.com/{repo_name}.git"
-            
-            if not github_client.clone_repository(clone_url, workspace_dir):
-                st.error("Failed to clone repository.")
-                st.stop()
+                st.write(f"**Targeting:** {issue_info['title']}")
                 
-            st.write("Initializing LangGraph orchestrator...")
-            graph = create_ase_graph()
-            
-            initial_state = {
-                "github_issue_url": issue_data["url"],
-                "issue_description": f"{issue_data['title']}\n\n{issue_data['body']}",
-                "repo_path": workspace_dir,
-                "validation_attempts": 0
-            }
-            
-            st.write("Entering Multi-Agent Graph...")
-            
-            final_state = None
-            try:
-                for event in graph.stream(initial_state):
-                    for node_name, node_state in event.items():
-                        with st.expander(f"⚙️ **{node_name.capitalize()} Agent** finished a step.", expanded=True):
-                            if node_name == "researcher":
-                                st.markdown("**🔍 Researcher Output:**")
-                                st.markdown(node_state.get("research_summary", ""))
-                            elif node_name == "coder":
-                                st.markdown("**💻 Coder Drafted Fix:**")
-                                code_fix_text = node_state.get("code_fix", "")
-                                if "```json" in code_fix_text:
-                                    explanation = code_fix_text.split("```json")[0]
-                                    if explanation.strip():
-                                        st.markdown(explanation)
-                                
-                                modified_files = node_state.get("modified_files_content", {})
-                                for file_path, content in modified_files.items():
-                                    with st.expander(f"Modified: {file_path}", expanded=True):
-                                        st.code(content, language="python")
-
-                            elif node_name == "qa":
-                                st.markdown("**🧪 QA Results:**")
-                                if node_state.get("test_passed"):
-                                    st.success("Test Passed!")
-                                else:
-                                    st.error("Test Failed. Sending feedback to Coder...")
-                                
-                                if node_state.get("qa_reflection"):
-                                    st.markdown(node_state.get("qa_reflection"))
-                                    
-                                if node_state.get("test_logs"):
-                                    with st.expander("View Raw Test Logs"):
-                                        st.code(node_state.get("test_logs", ""), language="bash")
-                                
-                        final_state = node_state
-            except Exception as e:
-                import groq
-                import re
-                if isinstance(e, groq.RateLimitError):
-                    # Try to extract the retry time from the message
-                    match = re.search(r"try again in ([\d\.]+[ms]|\d+:\d+)", str(e))
-                    retry_time = match.group(1) if match else "a few minutes"
-                    st.warning(f"⏳ **Groq API Rate Limit Reached.** Please wait {retry_time} before trying again. The free tier allows limited tokens per day.")
+                workspace_dir = os.path.abspath("./workspace_clones/target_repo")
+                st.write("📂 Cloning repository to workspace...")
+                if not gh_tool.clone_repository(issue_url, workspace_dir):
+                    st.error("Failed to clone repository. Workspace may be locked.")
+                    st.stop()
+                
+                # --- Orchestration ---
+                st.write("⚡ Starting agent orchestration...")
+                
+                initial_state = {
+                    "issue_url": issue_url,
+                    "issue_description": f"{issue_info['title']}\n\n{issue_info['body']}",
+                    "repo_path": workspace_dir,
+                    "files_to_modify": [],
+                    "research_summary": "",
+                    "updated_code": {},
+                    "test_logs": "",
+                    "test_passed": False,
+                    "test_explanation": "",
+                    "validation_attempts": 0
+                }
+                
+                graph = create_ase_graph()
+                final_state = None
+                
+                for output in graph.stream(initial_state):
+                    for node_name, state_update in output.items():
+                        icon = "📁" if node_name == "researcher" else "💻" if node_name == "coder" else "🧪"
+                        st.subheader(f"{icon} {node_name.capitalize()} Agent Output")
+                        
+                        if node_name == "researcher" and state_update.get("research_summary"):
+                            st.markdown(state_update["research_summary"])
+                        
+                        if node_name == "coder" and state_update.get("updated_code"):
+                            for file, code in state_update["updated_code"].items():
+                                st.markdown(f"**Fixed File:** `{file}`")
+                                st.code(code, language="python")
+                            if state_update.get("test_script"):
+                                st.markdown("**Generated Test Case:**")
+                                st.code(state_update["test_script"], language="python")
+                        
+                        if node_name == "tester":
+                            if state_update.get("test_passed"):
+                                st.success("✅ Tests Passed in Docker Sandbox!")
+                                if state_update.get("test_logs"):
+                                    with st.expander("View Execution Logs"):
+                                        st.code(state_update["test_logs"], language="bash")
+                            else:
+                                st.error("❌ Tests Failed")
+                                if state_update.get("test_explanation"):
+                                    st.warning(f"**Feedback for Coder:** {state_update['test_explanation']}")
+                        
+                        final_state = state_update
+                
+                if final_state and final_state.get("test_passed"):
+                    status.update(label="✅ Success! Issue Fixed.", state="complete")
+                    st.success("Issue resolved and verified by automated tests!")
+                    st.balloons()
                 else:
-                    st.error(f"An unexpected error occurred: {str(e)}")
-                status.update(label="Orchestration Stopped", state="error", expanded=True)
-                st.stop()
-                    
-            status.update(label="Orchestration Complete!", state="complete", expanded=False)
-            
-            # Store in session state to persist across UI reruns
-            st.session_state.final_state = final_state
-            st.session_state.workspace_dir = workspace_dir
-            
-if st.session_state.get("final_state"):
-    final_state = st.session_state.final_state
-    workspace_dir = st.session_state.workspace_dir
-    st.subheader("Agent Outputs")
-    
-    tab1, tab2, tab3 = st.tabs(["Researcher Report", "Coder Fix", "QA Results"])
-    
-    with tab1:
-        st.markdown(final_state.get("research_summary", "No report generated."))
-        
-    with tab2:
-        code_fix_text = final_state.get("code_fix", "No fix generated.")
-        if "```json" in code_fix_text:
-            explanation = code_fix_text.split("```json")[0]
-            if explanation.strip():
-                st.markdown(explanation)
-        elif code_fix_text != "No fix generated.":
-            st.markdown(code_fix_text)
-            
-        modified_files = final_state.get("modified_files_content", {})
-        if not modified_files and code_fix_text == "No fix generated.":
-            st.write("No fix generated.")
-        else:
-            for file_path, content in modified_files.items():
-                with st.expander(f"File: {file_path}", expanded=True):
-                    st.code(content, language="python")
-        
-    with tab3:
-        if final_state.get("test_passed"):
-            st.success("✅ All tests passed in Docker Sandbox.")
-            st.markdown("---")
-            st.subheader("🚢 Ready for Deployment")
-            st.write("The QA agent has verified the fix. You can now submit this automated fix back to the repository.")
-            
-            pr_title = st.text_input("PR Title", value=f"Fix for Issue #{issue_number}")
-            pr_branch = st.text_input("Branch Name", value=f"ghost-coder/fix-issue-{issue_number}")
-            
-            if st.button("Submit Pull Request"):
-                with st.spinner("Pushing code and Creating Pull Request on GitHub..."):
-                    github_client = GitHubIntegration()
-                    push_success = github_client.commit_and_push_changes(
-                        repo_dir=workspace_dir,
-                        branch_name=pr_branch,
-                        commit_message=pr_title
-                    )
-                    
-                    if not push_success:
-                        st.error("Failed to push local changes to GitHub branch.")
-                    else:
-                        pr_url = github_client.create_pull_request(
-                            repo_name=repo_name,
-                            branch_name=pr_branch,
-                            title=pr_title,
-                            body=f"Automated fix generated by Ghost Coder for issue #{issue_number}.\n\n"
-                        )
-                        if pr_url.startswith("http"):
-                            st.success(f"Pull Request successfully created! [View PR here]({pr_url})")
-                            st.balloons()
-                        else:
-                            st.error(pr_url)
+                    status.update(label="❌ Failed after multiple attempts.", state="error")
 
-        else:
-            st.error(f"❌ Tests failed after {final_state.get('validation_attempts')} attempts.")
-        
-        if final_state.get("qa_reflection"):
-            st.markdown(final_state.get("qa_reflection"))
-            
+with col2:
+    st.markdown("### Agent Activity")
+    if 'final_state' in locals() and final_state:
+        st.info(f"Attempts: {final_state.get('validation_attempts', 0)}")
         if final_state.get("test_logs"):
-            st.subheader("Test Execution Logs")
-            with st.expander("View Raw Test Logs"):
-                st.code(final_state.get("test_logs"), language="bash")
+            with st.expander("Test Results"):
+                st.code(final_state["test_logs"], language="bash")
+    else:
+        st.write("No active session.")

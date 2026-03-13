@@ -1,94 +1,58 @@
 import docker
 import os
-from typing import Dict, Any
+import tarfile
+import io
 
 class DockerSandbox:
-    def __init__(self):
-        try:
-            self.client = docker.from_env()
-            self.docker_available = True
-        except Exception as e:
-            self.client = None
-            self.docker_available = False
-            
-    def detect_language(self, repo_dir: str) -> Dict[str, str]:
-        """Detects the primary language of the repository to select the Docker image."""
-        if os.path.exists(os.path.join(repo_dir, "Cargo.toml")):
-            return {"language": "rust", "image": "rust:latest", "default_cmd": "cargo test"}
-        elif os.path.exists(os.path.join(repo_dir, "package.json")):
-            return {"language": "node", "image": "node:18", "default_cmd": "npm test"}
-        elif os.path.exists(os.path.join(repo_dir, "go.mod")):
-            return {"language": "go", "image": "golang:latest", "default_cmd": "go test ./..."}
-        else:
-            # Default to Python
-            return {"language": "python", "image": "python:3.11-slim", "default_cmd": "pytest"}
-        
-    def run_tests(self, repo_dir: str, test_file_path: str = "", dependencies: list[str] = None, custom_command: str = "") -> Dict[str, Any]:
-        """
-        Executes a test file inside an isolated Docker container based on the repo's language, 
-        with a fallback to local subprocess execution if Docker is unavailable.
-        """
-        abs_repo_dir = os.path.abspath(repo_dir)
-        lang_config = self.detect_language(abs_repo_dir)
-        base_cmd = custom_command or lang_config["default_cmd"]
-        
-        if not self.docker_available:
-            import subprocess
-            try:
-                cmd = base_cmd
-                if test_file_path:
-                    cmd += f" {test_file_path}"
-                env = os.environ.copy()
-                if lang_config["language"] == "python":
-                    env["PYTHONPATH"] = abs_repo_dir
-                
-                result = subprocess.run(cmd, cwd=abs_repo_dir, shell=True, capture_output=True, text=True, timeout=120, env=env)
-                return {
-                    "success": result.returncode == 0,
-                    "logs": f"[WARNING: Docker unavailable. Ran test locally.]\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
-                }
-            except Exception as e:
-                return {"success": False, "logs": f"Local run failed: {str(e)}"}
+    def __init__(self, image="python:3.11-slim"):
+        self.client = docker.from_env()
+        self.image = image
 
-        image = lang_config["image"]
-        
-        # Build command depending on language
-        if lang_config["language"] == "python":
-            setup_deps = ""
-            if dependencies:
-                deps_str = " ".join(dependencies)
-                setup_deps = f"pip install {deps_str} &&"
-            cmd_target = f" {test_file_path}" if test_file_path else ""
-            command = f"bash -c '{setup_deps} export PYTHONPATH=/workspace && {base_cmd}{cmd_target}'"
-        else:
-            command = f"bash -c '{base_cmd}'"
-        
+    def run_test(self, repo_path: str, test_script_content: str, test_file_name="test_fix.py") -> dict:
+        """
+        Runs a test script inside a Docker container using the repo as context.
+        """
+        container = None
         try:
-            # Use auto_remove=False to capture logs, then remove manually
+            # 1. Write the test script to the local repo path first
+            test_file_path = os.path.join(repo_path, test_file_name)
+            with open(test_file_path, 'w', encoding='utf-8') as f:
+                f.write(test_script_content)
+
+            # 2. Create container and start it with the repo path mounted
+            # Note: We use volume mounting for simplicity since it's local
             container = self.client.containers.run(
-                image,
-                command=command,
-                volumes={abs_repo_dir: {'bind': '/workspace', 'mode': 'rw'}},
-                working_dir='/workspace',
+                self.image,
+                command=["python", test_file_name],
+                volumes={
+                    os.path.abspath(repo_path): {
+                        'bind': '/app',
+                        'mode': 'rw'
+                    }
+                },
+                working_dir='/app',
                 detach=True
             )
-            
-            result = container.wait(timeout=120) 
+
+            # 3. Wait for completion and capture logs
+            result = container.wait()
             logs = container.logs().decode('utf-8')
-            container.remove()
+            
+            exit_code = result.get('StatusCode', 1)
             
             return {
-                "success": result["StatusCode"] == 0,
+                "exit_code": exit_code,
                 "logs": logs
             }
-            
-        except docker.errors.ContainerError as e:
-            return {
-                "success": False,
-                "logs": e.stderr.decode('utf-8') if e.stderr else str(e)
-            }
+
         except Exception as e:
             return {
-                "success": False,
-                "logs": f"Sandbox Error: {str(e)}"
+                "exit_code": 1,
+                "logs": f"Docker Sandbox Error: {str(e)}"
             }
+        finally:
+            if container:
+                try:
+                    container.remove(force=True)
+                except:
+                    pass

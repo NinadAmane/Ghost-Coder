@@ -1,28 +1,25 @@
-import operator
-from typing import Annotated, TypedDict, List, Dict, Any
+from typing import TypedDict, List, Dict, Any
 
 class ASEState(TypedDict):
     """
-    Represents the state of our multi-agent orchestration graph.
+    Minimalist state for the 3-agent core.
     """
-    github_issue_url: str
+    issue_url: str
     issue_description: str
     repo_path: str
     
     # Researcher Output
-    research_summary: str
     files_to_modify: List[str]
+    research_summary: str
     
     # Coder Output
-    code_fix: str
-    modified_files_content: Dict[str, str] # mapping of filepath -> new content
-    new_dependencies: List[str]
+    updated_code: Dict[str, str] # mapping of filepath -> new content
+    test_script: str
     
-    # QA Output
-    test_file_path: str
+    # Tester Output
     test_logs: str
     test_passed: bool
+    test_explanation: str
     
-    # Orchestrator
-    current_agent: str
+    # Metadata
     validation_attempts: int
