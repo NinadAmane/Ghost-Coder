@@ -10,7 +10,7 @@ load_dotenv()
 
 st.set_page_config(
     page_title="Ghost Coder | Autonomous Agent",
-    page_icon="👻",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -49,7 +49,7 @@ st.markdown("""
 
 # --- Sidebar Configuration ---
 with st.sidebar:
-    st.image("https://img.icons8.com/plasticine/100/000000/ghost.png", width=80)
+    st.image("Ghost_coder_logo.png", width=500)
     st.title("Settings")
     
     st.markdown("### API Keys")
@@ -58,21 +58,35 @@ with st.sidebar:
     
     if gh_token: os.environ["GITHUB_TOKEN"] = gh_token
     if groq_key: os.environ["GROQ_API_KEY"] = groq_key
-    
-    st.divider()
-    st.markdown("### 3-Agent Core")
-    st.info("Currently running in minimalist mode: Researcher -> Coder -> Tester")
+
 
 # --- Main UI ---
-st.title("👻 Ghost Coder")
-st.markdown("#### Autonomous Software Engineering Orchestrator")
+logo_col, title_col = st.columns([1, 15]) # Adjust the ratio [1, 10] to change spacing
+
+with title_col:
+    st.title("Ghost Coder")
+with logo_col:
+    # Assuming you are using the same logo from the sidebar
+    st.image("Ghost_coder_logo-transparent-only-logo.png", width=70) 
+
+st.markdown("""
+Welcome to **Ghost Coder**, a stateful multi-agent system that autonomously resolves GitHub issues. 
+Isolated in a secure Docker Sandbox, this orchestrator uses a team of specialized AI agents to analyze codebases, write patches, and verify fixes before submitting them for review.
+
+**How to use:**
+1. 🔗 **Input Target:** Paste a valid GitHub Issue URL into the field below.
+2. 🔑 **Authenticate:** Ensure your GitHub and Groq API Keys are set in the sidebar.
+3. ⚡ **Execute:** Click "Execute Autonomous Fix" to trigger the `Researcher ➡️ Coder ➡️ Tester` pipeline.
+4. 🚀 **Deploy:** Once the agents verify the fix, use the Human-in-the-Loop pipeline to review and push your Pull Request.
+""")
+st.divider()
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
     issue_url = st.text_input("Issue URL", placeholder="https://github.com/owner/repo/issues/123")
     
-    if st.button("🚀 Execute Autonomous Fix"):
+    if st.button("Execute Autonomous Fix"):
         if not issue_url:
             st.warning("Please provide a GitHub Issue URL.")
         elif not os.getenv("GITHUB_TOKEN") or not os.getenv("GROQ_API_KEY"):
