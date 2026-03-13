@@ -84,7 +84,7 @@ class GitHubTool:
             subprocess.run(['git', 'config', 'user.email', 'bot@example.com'], cwd=repo_dir, check=True)
             subprocess.run(['git', 'config', 'user.name', 'Agent Bot'], cwd=repo_dir, check=True)
             subprocess.run(['git', 'checkout', '-b', branch_name], cwd=repo_dir, check=True)
-            subprocess.run(['git', 'add', '.'], cwd=repo_dir, check=True)
+            subprocess.run(['git', 'add', '-A', '-f'], cwd=repo_dir, check=True)
             subprocess.run(['git', 'commit', '--allow-empty', '-m', title], cwd=repo_dir, check=True)
             
             origin_url_bytes = subprocess.check_output(['git', 'config', '--get', 'remote.origin.url'], cwd=repo_dir)

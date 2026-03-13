@@ -30,7 +30,7 @@ def main():
         os.chmod(path, stat.S_IWRITE)
         func(path)
         
-    workspace_dir = os.path.abspath("./.workspace/target_repo")
+    workspace_dir = os.path.abspath("./workspace_clones/target_repo")
     if os.path.exists(workspace_dir):
         shutil.rmtree(workspace_dir, onerror=remove_readonly)
     os.makedirs(workspace_dir, exist_ok=True)
@@ -87,10 +87,10 @@ def main():
         print(f"Error executing graph: {e}")
         return
 
-    if final_state and final_state.get("pr_url"):
+    if final_state and final_state.get("pr_url") and final_state["pr_url"].startswith("http"):
         print(f"Success! Pull Request opened at: {final_state['pr_url']}")
     else:
-        print("Orchestration completed, but no PR was opened.")
+        print(f"Orchestration completed, but no PR was opened. Status: {final_state.get('pr_url', 'N/A')}")
 
 if __name__ == "__main__":
     main()

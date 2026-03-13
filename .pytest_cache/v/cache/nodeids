@@ -1,0 +1,16 @@
+[
+  ".workspace/langchain-ai_langchain/tests/test_fix.py::TestListRepoFiles::test_list_repo_files",
+  ".workspace/langchain-ai_langchain/tests/test_fix.py::test_chain_save",
+  ".workspace/langchain-ai_langgraph/tests/test_fix.py::TestBranch::test_add_edge",
+  ".workspace/langchain-ai_langgraph/tests/test_fix.py::TestBranch::test_get_destination",
+  ".workspace/langchain-ai_langgraph/tests/test_fix.py::TestBranch::test_init",
+  ".workspace/langchain-ai_langgraph/tests/test_fix.py::TestBranch::test_init_with_condition",
+  ".workspace/langchain-ai_langgraph/tests/test_fix.py::TestBranchSpec::test_finish_with_end",
+  ".workspace/langchain-ai_langgraph/tests/test_fix.py::TestBranchSpec::test_finish_without_end",
+  "tests/test_coder.py::test_coder_node_absolute_path_traversal",
+  "tests/test_coder.py::test_coder_node_path_traversal",
+  "tests/test_coder.py::test_coder_node_valid_path",
+  "tests/test_docker_sandbox.py::test_detect_language_python",
+  "tests/test_docker_sandbox.py::test_detect_language_rust",
+  "tests/test_docker_sandbox.py::test_run_tests_success"
+]

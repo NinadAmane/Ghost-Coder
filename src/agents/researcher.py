@@ -23,7 +23,7 @@ Your final response MUST be a valid JSON object matching this schema exactly:
 }}"""
 
 def researcher_node(state: ASEState) -> ASEState:
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.5)
     
     # Initialize Tool
     gh_tool = GitHubTool()

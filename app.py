@@ -52,7 +52,7 @@ if st.button("Start Orchestration", type="primary"):
             os.chmod(path, stat.S_IWRITE)
             func(path)
             
-        workspace_dir = os.path.abspath("./.workspace/target_repo")
+        workspace_dir = os.path.abspath("./workspace_clones/target_repo")
         if os.path.exists(workspace_dir):
             shutil.rmtree(workspace_dir, onerror=remove_readonly)
         os.makedirs(workspace_dir, exist_ok=True)
@@ -120,8 +120,7 @@ if st.button("Start Orchestration", type="primary"):
         st.code(traceback.format_exc())
         st.stop()
 
-    if final_state and final_state.get("pr_url"):
-        st.balloons()
+    if final_state and final_state.get("pr_url") and final_state["pr_url"].startswith("http"):
         st.success(f"🎉 **Success!** Pull Request autonomously opened: [View PR]({final_state['pr_url']})")
     else:
-        st.warning("Orchestration completed, but no Pull Request was opened.")
+        st.error(f"Orchestration completed, but Pull Request failed: {final_state.get('pr_url', 'No details available')}")
