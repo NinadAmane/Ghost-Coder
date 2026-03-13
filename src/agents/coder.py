@@ -35,6 +35,9 @@ def coder_node(state: ASEState):
         Task: Based on the researcher's findings and any previous failures, rewrite the function to fix the bug. 
         Provide the full content of the updated file.
         
+        If the file to modify is 'requirements.txt', provide a minimalist list of pip dependencies 
+        (one per line) required for the code and tests to run (e.g., pandas, scikit-learn).
+        
         Return ONLY the complete new file content. No markdown, no explanation.
         """
         

@@ -20,10 +20,12 @@ class DockerSandbox:
                 f.write(test_script_content)
 
             # 2. Create container and start it with the repo path mounted
-            # Note: We use volume mounting for simplicity since it's local
+            # We use a shell command to install requirements before running the test
+            setup_and_run_cmd = f"if [ -f requirements.txt ]; then pip install -r requirements.txt; fi && python {test_file_name}"
+
             container = self.client.containers.run(
                 self.image,
-                command=["python", test_file_name],
+                command=["sh", "-c", setup_and_run_cmd],
                 volumes={
                     os.path.abspath(repo_path): {
                         'bind': '/app',

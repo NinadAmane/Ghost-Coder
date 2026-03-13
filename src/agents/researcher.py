@@ -25,6 +25,9 @@ def researcher_node(state: ASEState):
     Find the specific file and lines causing this issue. 
     Output the filename and a code snippet of the problem area.
     
+    IMPORTANT: If the issue involves missing dependencies or third-party libraries (e.g., pandas, sklearn, numpy), 
+    you MUST also include 'requirements.txt' in your FILE list, even if it does not exist in the tree.
+    
     Format your response as:
     FILE: <path/to/file>
     SNIPPET:
