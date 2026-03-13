@@ -159,7 +159,7 @@ We welcome contributions! Please see our contributing guidelines for more detail
 ---
 
 ## 📄 License
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU AGPLv3 License**. See the [LICENSE](LICENSE) file for details.
 
 ---
 
