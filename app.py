@@ -113,10 +113,13 @@ with col1:
                 }
                 
                 graph = create_ase_graph()
-                final_state = None
+                final_state = initial_state.copy()
                 
                 for output in graph.stream(initial_state):
                     for node_name, state_update in output.items():
+                        # Update cumulative state
+                        final_state.update(state_update)
+                        
                         icon = "📁" if node_name == "researcher" else "💻" if node_name == "coder" else "🧪"
                         st.subheader(f"{icon} {node_name.capitalize()} Agent Output")
                         
@@ -142,21 +145,121 @@ with col1:
                                 if state_update.get("test_explanation"):
                                     st.warning(f"**Feedback for Coder:** {state_update['test_explanation']}")
                         
-                        final_state = state_update
+                        final_state.update(state_update)
                 
                 if final_state and final_state.get("test_passed"):
                     status.update(label="✅ Success! Issue Fixed.", state="complete")
                     st.success("Issue resolved and verified by automated tests!")
                     st.balloons()
+                    
+                    # Persist state for PR pipeline
+                    st.session_state.final_state = final_state
+                    if "pr_step" not in st.session_state:
+                        st.session_state.pr_step = "branching"
                 else:
                     status.update(label="❌ Failed after multiple attempts.", state="error")
 
+    # --- HUMAN-IN-THE-LOOP DEPLOYMENT PIPELINE ---
+    if st.session_state.get("final_state") and st.session_state.final_state.get("test_passed"):
+        st.divider()
+        st.header("🚀 Deployment Pipeline (Human-in-the-Loop)")
+        
+        final_state = st.session_state.final_state
+        gh_tool = GitHubTool()
+        repo_path = final_state["repo_path"]
+        issue_url = final_state["issue_url"]
+        files_to_update = list(final_state["updated_code"].keys())
+        
+        # --- STEP 1: BRANCH & STAGE ---
+        if st.session_state.pr_step == "branching":
+            st.warning(f"⚠️ **Target Verification:** You are about to stage changes for **{issue_url}**.")
+            st.write(f"Files to be staged: `{files_to_update}`")
+            
+            if st.button("Confirm Target & Stage Changes"):
+                # Use issue ID for branch name
+                issue_id = issue_url.split('/')[-1]
+                branch_name = f"ghost-fix-{issue_id}"
+                st.session_state.branch_name = branch_name
+                
+                with st.spinner("Creating branch and staging files..."):
+                    gh_tool.create_branch(repo_path, branch_name)
+                    gh_tool.stage_files(repo_path, files_to_update)
+                
+                st.session_state.pr_step = "committing"
+                st.rerun()
+
+        # --- STEP 2: COMMIT ---
+        elif st.session_state.pr_step == "committing":
+            st.info("✅ Files successfully staged.")
+            
+            # Display Git Status
+            st.markdown("**Current Git Status:**")
+            st.code(gh_tool.get_git_status(repo_path), language="bash")
+            
+            st.warning("⚠️ Review the status above. Are you sure you want to commit?")
+            if st.button("Commit Changes"):
+                commit_msg = f"fix: resolved issue described in {issue_url}"
+                with st.spinner("Committing..."):
+                    gh_tool.commit_changes(repo_path, commit_msg)
+                
+                st.session_state.pr_step = "pushing"
+                st.rerun()
+
+        # --- STEP 3: PUSH & PR ---
+        elif st.session_state.pr_step == "pushing":
+            st.success("✅ Changes locally committed.")
+            
+            # Display Git Status
+            st.markdown("**Current Git Status:**")
+            st.code(gh_tool.get_git_status(repo_path), language="bash")
+            
+            if st.button("Push to Remote & Open Pull Request"):
+                with st.spinner("Pushing branch and talking to GitHub API..."):
+                    branch_name = st.session_state.branch_name
+                    
+                    # Push
+                    push_output = gh_tool.push_branch(repo_path, branch_name)
+                    
+                    # Create PR
+                    issue_id = issue_url.split('/')[-1]
+                    pr_body = (
+                        f"### Ghost Coder Autonomous Fix\n"
+                        f"Closes {issue_url}\n\n"
+                        f"**Test Verification Logs:**\n```\n{final_state.get('test_logs', 'Passed')}\n```"
+                    )
+                    pr_url = gh_tool.create_pull_request(
+                        issue_url=issue_url,
+                        branch_name=branch_name,
+                        title=f"Ghost Coder Fix for issue #{issue_id}",
+                        body=pr_body
+                    )
+                    
+                if "http" in pr_url:
+                    st.success(f"🎉 Pull Request Successfully Opened from branch `{branch_name}`")
+                    st.markdown(f"**[View Pull Request on GitHub]({pr_url})**")
+                    st.session_state.pr_step = "done"
+                else:
+                    st.error(f"Failed to open PR: {pr_url}")
+
+        # --- DONE ---
+        elif st.session_state.pr_step == "done":
+            st.success("✨ Deployment Complete. Awaiting human code review on GitHub.")
+            if st.button("Start New Fix"):
+                # Clear session state to restart
+                for key in ["final_state", "pr_step", "branch_name"]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+
 with col2:
     st.markdown("### Agent Activity")
-    if 'final_state' in locals() and final_state:
-        st.info(f"Attempts: {final_state.get('validation_attempts', 0)}")
-        if final_state.get("test_logs"):
+    # Check session state or local variable
+    active_state = st.session_state.get("final_state") or (final_state if 'final_state' in locals() else None)
+    
+    if active_state:
+        st.info(f"Attempts: {active_state.get('validation_attempts', 0)}")
+        if active_state.get("test_logs"):
             with st.expander("Test Results"):
-                st.code(final_state["test_logs"], language="bash")
+                st.code(active_state["test_logs"], language="bash")
     else:
         st.write("No active session.")

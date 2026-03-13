@@ -50,8 +50,15 @@ def coder_node(state: ASEState):
                 lines = lines[:-1]
             new_content = "\n".join(lines).strip()
         
-        # Apply fix locally with security check
-        full_path = os.path.abspath(os.path.join(state["repo_path"], file_path))
+        # Strip leading repo basename from file_path if it exists (prevents nested directory bug)
+        repo_basename = os.path.basename(state["repo_path"].rstrip(os.sep))
+        clean_file_path = file_path
+        if file_path.startswith(f"{repo_basename}/"):
+            clean_file_path = file_path[len(repo_basename)+1:]
+        elif file_path.startswith(f"./{repo_basename}/"):
+            clean_file_path = file_path[len(repo_basename)+3:]
+            
+        full_path = os.path.abspath(os.path.join(state["repo_path"], clean_file_path))
         
         # Security Check: Ensure path is within repo_path
         if not full_path.startswith(os.path.abspath(state["repo_path"])):

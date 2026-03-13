@@ -82,7 +82,8 @@ class GitHubTool:
                 
             level = root.replace(repo_path, '').count(os.sep)
             indent = ' ' * 4 * level
-            tree_output.append(f"{indent}{os.path.basename(root)}/")
+            basename = os.path.basename(root) if level > 0 else "."
+            tree_output.append(f"{indent}{basename}/")
             sub_indent = ' ' * 4 * (level + 1)
             for f in files:
                 tree_output.append(f"{sub_indent}{f}")
@@ -99,3 +100,78 @@ class GitHubTool:
             except Exception as e:
                 return f"Error reading file: {str(e)}"
         return "File not found."
+
+    def run_git_command(self, repo_path: str, command: list) -> str:
+        """Executes a git command and returns the output."""
+        try:
+            result = subprocess.run(
+                ['git'] + command, 
+                cwd=repo_path, 
+                capture_output=True, 
+                text=True, 
+                check=True
+            )
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            # Fallback to stdout or the generic error if stderr is somehow empty
+            error_msg = e.stderr if e.stderr else (e.stdout or str(e))
+            return f"Error: {error_msg}"
+
+    def get_git_status(self, repo_path: str) -> str:
+        """ Returns the current git status of the repository. """
+        return self.run_git_command(repo_path, ['status'])
+
+    def create_branch(self, repo_path: str, branch_name: str) -> str:
+        """ Creates and checks out a new git branch. """
+        return self.run_git_command(repo_path, ['checkout', '-b', branch_name])
+
+    def stage_files(self, repo_path: str, files: list) -> str:
+        """ Stages specific files for commit. """
+        return self.run_git_command(repo_path, ['add'] + files)
+
+    def commit_changes(self, repo_path: str, message: str) -> str:
+        """ Commits staged changes with a message and explicit identity. """
+        # Sets a generic identity just for this execution if needed
+        env = os.environ.copy()
+        env['GIT_AUTHOR_NAME'] = 'Ghost Coder Bot'
+        env['GIT_AUTHOR_EMAIL'] = 'bot@ghostcoder.ai'
+        env['GIT_COMMITTER_NAME'] = 'Ghost Coder Bot'
+        env['GIT_COMMITTER_EMAIL'] = 'bot@ghostcoder.ai'
+        
+        try:
+            result = subprocess.run(
+                ['git', 'commit', '-m', message], 
+                cwd=repo_path, 
+                capture_output=True, 
+                text=True, 
+                check=True,
+                env=env
+            )
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr if e.stderr else (e.stdout or str(e))
+            return f"Error: {error_msg}"
+
+    def push_branch(self, repo_path: str, branch_name: str) -> str:
+        """ Pushes the local branch to the remote origin. """
+        return self.run_git_command(repo_path, ['push', '-u', 'origin', branch_name])
+
+    def create_pull_request(self, issue_url: str, branch_name: str, title: str, body: str) -> str:
+        """ Uses the GitHub API to open a Pull Request. """
+        if not self.client:
+            return "Error: GitHub Client Not Initialized"
+        
+        parts = issue_url.rstrip("/").split("/")
+        owner, repo_name = parts[-4], parts[-3]
+        
+        try:
+            repo = self.client.get_repo(f"{owner}/{repo_name}")
+            pr = repo.create_pull(
+                title=title,
+                body=body,
+                head=branch_name,
+                base=repo.default_branch
+            )
+            return pr.html_url
+        except Exception as e:
+            return f"Failed to create PR: {str(e)}"
