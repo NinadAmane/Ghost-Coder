@@ -164,4 +164,8 @@ This project is licensed under the **GNU AGPLv3 License**. See the [LICENSE](LIC
 ---
 
 ## 🤝 Credits
-Architected by **Ninad Amane**.
+
+Architected and developed by **Ninad Amane**.
+
+[![GitHub](https://img.shields.io/badge/GitHub-Profile-181717?logo=github&style=for-the-badge)](https://github.com/NinadAmane)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?logo=linkedin&style=for-the-badge)](https://www.linkedin.com/in/ninad-amane/)
