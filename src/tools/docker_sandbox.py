@@ -56,3 +56,11 @@ class DockerSandbox:
                     container.remove(force=True)
                 except:
                     pass
+            
+            # Sandbox Cleanliness: Remove the local test file to keep the repo clean
+            try:
+                test_file_path = os.path.join(repo_path, test_file_name)
+                if os.path.exists(test_file_path):
+                    os.remove(test_file_path)
+            except:
+                pass

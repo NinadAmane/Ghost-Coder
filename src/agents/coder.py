@@ -50,8 +50,14 @@ def coder_node(state: ASEState):
                 lines = lines[:-1]
             new_content = "\n".join(lines).strip()
         
-        # Apply fix locally
-        full_path = os.path.join(state["repo_path"], file_path)
+        # Apply fix locally with security check
+        full_path = os.path.abspath(os.path.join(state["repo_path"], file_path))
+        
+        # Security Check: Ensure path is within repo_path
+        if not full_path.startswith(os.path.abspath(state["repo_path"])):
+            print(f"⚠️ SECURITY ALERT: Attempted directory traversal detected for path: {file_path}")
+            continue
+
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
