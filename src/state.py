@@ -8,6 +8,10 @@ class ASEState(TypedDict):
     issue_description: str
     repo_path: str
     
+    # API Keys
+    github_token: str
+    groq_api_key: str
+    
     # Researcher Output
     files_to_modify: List[str]
     research_summary: str

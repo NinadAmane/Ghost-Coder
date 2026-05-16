@@ -9,8 +9,8 @@ def researcher_node(state: ASEState):
     Output the filename and a code snippet of the problem area.
     """
     print("--- RESEARCHING ISSUE ---")
-    llm = ChatGroq(model_name="llama-3.3-70b-versatile")
-    gh_tool = GitHubTool()
+    llm = ChatGroq(model_name="llama-3.3-70b-versatile", api_key=state.get("groq_api_key"))
+    gh_tool = GitHubTool(token=state.get("github_token"))
     
     # 1. Get repo context (file tree)
     tree = gh_tool.list_files_tree(state["repo_path"])

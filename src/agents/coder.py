@@ -9,8 +9,8 @@ def coder_node(state: ASEState):
     Provide the full content of the updated file.
     """
     print("--- CODING FIX ---")
-    llm = ChatGroq(model_name="llama-3.3-70b-versatile")
-    gh_tool = GitHubTool()
+    llm = ChatGroq(model_name="llama-3.3-70b-versatile", api_key=state.get("groq_api_key"))
+    gh_tool = GitHubTool(token=state.get("github_token"))
     
     updated_code = {}
     test_script = ""

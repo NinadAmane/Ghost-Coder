@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class GitHubTool:
-    def __init__(self):
-        self.token = os.getenv("GITHUB_TOKEN")
+    def __init__(self, token: str = None):
+        self.token = token or os.getenv("GITHUB_TOKEN")
         if self.token:
             self.client = Github(self.token)
         else:
@@ -55,6 +55,11 @@ class GitHubTool:
         
         try:
             if os.path.exists(os.path.join(dest_dir, ".git")):
+                # Reset to clean state for retry
+                subprocess.run(['git', 'reset', '--hard', 'origin/HEAD'], cwd=dest_dir, check=False)
+                subprocess.run(['git', 'clean', '-fd'], cwd=dest_dir, check=False)
+                # Also pull latest in case the user merged the PR
+                subprocess.run(['git', 'pull'], cwd=dest_dir, check=False)
                 return True
             
             if not os.path.exists(dest_dir) or not os.listdir(dest_dir):
@@ -103,9 +108,11 @@ class GitHubTool:
 
     def run_git_command(self, repo_path: str, command: list) -> str:
         """Executes a git command and returns the output."""
+        # Security mitigation: disable git hooks on the host to prevent sandbox escape
+        secure_command = ['-c', 'core.hooksPath=/dev/null'] + command
         try:
             result = subprocess.run(
-                ['git'] + command, 
+                ['git'] + secure_command, 
                 cwd=repo_path, 
                 capture_output=True, 
                 text=True, 

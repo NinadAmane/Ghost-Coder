@@ -1,11 +1,12 @@
 import streamlit as st
 import os
 import time
+import hashlib
 from src.graph import create_ase_graph
 from src.tools.github_tools import GitHubTool
 from dotenv import load_dotenv
 
-# Load env but also allow manual override in sidebar
+# Load local .env (ignored if deployed on Streamlit Cloud)
 load_dotenv()
 
 st.set_page_config(
@@ -52,12 +53,22 @@ with st.sidebar:
     st.image("Ghost_coder_logo.png", width=500)
     st.title("Settings")
     
-    st.markdown("### API Keys")
-    gh_token = st.text_input("GitHub Token", value=os.getenv("GITHUB_TOKEN", ""), type="password")
-    groq_key = st.text_input("Groq API Key", value=os.getenv("GROQ_API_KEY", ""), type="password")
+    st.markdown("### Authentication")
+    app_password = st.text_input("App Password", type="password", help="Enter the password to use this app.")
     
-    if gh_token: os.environ["GITHUB_TOKEN"] = gh_token
-    if groq_key: os.environ["GROQ_API_KEY"] = groq_key
+    # Load keys from Streamlit Secrets or .env
+    gh_token = ""
+    groq_key = ""
+    expected_password = "demo" # Fallback password if not set
+    
+    try:
+        gh_token = st.secrets.get("GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN", "")
+        groq_key = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", "")
+        expected_password = st.secrets.get("APP_PASSWORD") or os.getenv("APP_PASSWORD", "demo")
+    except Exception:
+        gh_token = os.getenv("GITHUB_TOKEN", "")
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        expected_password = os.getenv("APP_PASSWORD", "demo")
 
 
 # --- Main UI ---
@@ -87,12 +98,14 @@ with col1:
     issue_url = st.text_input("Issue URL", placeholder="https://github.com/owner/repo/issues/123")
     
     if st.button("Execute Autonomous Fix"):
-        if not issue_url:
+        if app_password != expected_password:
+            st.error("Incorrect password.")
+        elif not issue_url:
             st.warning("Please provide a GitHub Issue URL.")
-        elif not os.getenv("GITHUB_TOKEN") or not os.getenv("GROQ_API_KEY"):
-            st.error("Missing API keys. Please set them in the sidebar or .env file.")
+        elif not gh_token or not groq_key:
+            st.error("Missing API keys in Streamlit secrets or .env file.")
         else:
-            gh_tool = GitHubTool()
+            gh_tool = GitHubTool(token=gh_token)
             
             with st.status("Initializing Environment...", expanded=True) as status:
                 st.write("🔍 Fetching issue metadata...")
@@ -104,7 +117,8 @@ with col1:
                 
                 st.write(f"**Targeting:** {issue_info['title']}")
                 
-                workspace_dir = os.path.abspath("./workspace_clones/target_repo")
+                session_id = hashlib.md5(issue_url.encode()).hexdigest()[:8]
+                workspace_dir = os.path.abspath(f"./workspace_clones/target_repo_{session_id}")
                 st.write("📂 Cloning repository to workspace...")
                 if not gh_tool.clone_repository(issue_url, workspace_dir):
                     st.error("Failed to clone repository. Workspace may be locked.")
@@ -117,6 +131,8 @@ with col1:
                     "issue_url": issue_url,
                     "issue_description": f"{issue_info['title']}\n\n{issue_info['body']}",
                     "repo_path": workspace_dir,
+                    "github_token": gh_token,
+                    "groq_api_key": groq_key,
                     "files_to_modify": [],
                     "research_summary": "",
                     "updated_code": {},
@@ -179,7 +195,7 @@ with col1:
         st.header("🚀 Deployment Pipeline (Human-in-the-Loop)")
         
         final_state = st.session_state.final_state
-        gh_tool = GitHubTool()
+        gh_tool = GitHubTool(token=final_state["github_token"])
         repo_path = final_state["repo_path"]
         issue_url = final_state["issue_url"]
         files_to_update = list(final_state["updated_code"].keys())

@@ -4,7 +4,7 @@ import tarfile
 import io
 
 class DockerSandbox:
-    def __init__(self, image="python:3.11-slim"):
+    def __init__(self, image="python:3.11"):
         self.client = docker.from_env()
         self.image = image
 
@@ -20,8 +20,12 @@ class DockerSandbox:
                 f.write(test_script_content)
 
             # 2. Create container and start it with the repo path mounted
-            # We use a shell command to install requirements before running the test
-            setup_and_run_cmd = f"if [ -f requirements.txt ]; then pip install -r requirements.txt; fi && python {test_file_name}"
+            # We intelligently install project dependencies so standard packages (like pandas) are available
+            setup_and_run_cmd = (
+                "if [ -f pyproject.toml ] || [ -f setup.py ]; then pip install -e . || pip install . ; fi; "
+                "if [ -f requirements.txt ]; then pip install -r requirements.txt; fi; "
+                f"python {test_file_name}"
+            )
 
             container = self.client.containers.run(
                 self.image,

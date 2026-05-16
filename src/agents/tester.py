@@ -8,7 +8,7 @@ def tester_node(state: ASEState):
     Run it in the sandbox. If it fails, explain why to the coder.
     """
     print("--- TESTING FIX ---")
-    llm = ChatGroq(model_name="llama-3.3-70b-versatile")
+    llm = ChatGroq(model_name="llama-3.3-70b-versatile", api_key=state.get("groq_api_key"))
     sandbox = DockerSandbox()
     
     test_script_content = state.get("test_script", "")
