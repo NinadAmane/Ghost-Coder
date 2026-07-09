@@ -22,3 +22,5 @@ workspace_clones/
 .DS_Store
 
 API_KEYS.md
+.coverage
+coverage.xml

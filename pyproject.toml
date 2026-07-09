@@ -1,7 +1,7 @@
 [project]
 name = "multi-agent-orchestration-project"
 version = "0.1.0"
-description = "Add your description here"
+description = "Ghost Coder: Autonomous multi-agent GitHub issue resolver"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,10 +18,28 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-    "pytest-mock>=3.12.0"
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=5.0.0",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = [
   "."
+]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "integration: marks integration tests (deselect with '-m \"not integration\"')",
+]
+
+[tool.coverage.run]
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
 ]

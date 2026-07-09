@@ -4,10 +4,11 @@ import time
 import hashlib
 from src.graph import create_ase_graph
 from src.tools.github_tools import GitHubTool
+from src.metrics import RunMetrics
 from dotenv import load_dotenv
 
 # Load local .env (ignored if deployed on Streamlit Cloud)
-load_dotenv()
+load_dotenv(override=True)
 
 st.set_page_config(
     page_title="Ghost Coder | Autonomous Agent",
@@ -45,6 +46,13 @@ st.markdown("""
         font-size: 0.9rem;
         color: #888;
     }
+    .metric-card {
+        padding: 1rem;
+        border-radius: 8px;
+        background: rgba(75, 0, 130, 0.15);
+        border: 1px solid rgba(147, 112, 219, 0.3);
+        margin-bottom: 0.75rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,6 +78,17 @@ with st.sidebar:
         groq_key = os.getenv("GROQ_API_KEY", "")
         expected_password = os.getenv("APP_PASSWORD", "demo")
 
+    # --- Cost estimation config ---
+    st.markdown("### Cost Estimation")
+    cost_per_million = st.number_input(
+        "Cost per 1M tokens (USD)",
+        min_value=0.0,
+        value=0.0,
+        step=0.01,
+        help="Set to 0 to disable cost estimation. "
+             "Groq free tier = $0. Paid tiers vary by model.",
+    )
+
 
 # --- Main UI ---
 logo_col, title_col = st.columns([1, 15]) # Adjust the ratio [1, 10] to change spacing
@@ -81,8 +100,8 @@ with logo_col:
     st.image("Ghost_coder_logo-transparent-only-logo.png", width=70) 
 
 st.markdown("""
-Welcome to **Ghost Coder**, a stateful multi-agent system that autonomously resolves GitHub issues. 
-Isolated in a secure Docker Sandbox, this orchestrator uses a team of specialized AI agents to analyze codebases, write patches, and verify fixes before submitting them for review.
+Welcome to **Ghost Coder**, an experimental multi-agent system that attempts to autonomously resolve GitHub issues.
+It runs generated patches through an isolated Docker sandbox to check correctness before proposing a Pull Request for human review.
 
 **How to use:**
 1. 🔗 **Input Target:** Paste a valid GitHub Issue URL into the field below.
@@ -142,7 +161,12 @@ with col1:
                     "validation_attempts": 0
                 }
                 
-                graph = create_ase_graph()
+                # Fresh metrics instance per orchestration call — scoped to
+                # this run, stored in session_state, zero cross-session leakage.
+                run_metrics = RunMetrics()
+                run_metrics.start_run()
+
+                graph = create_ase_graph(metrics=run_metrics)
                 final_state = initial_state.copy()
                 
                 for output in graph.stream(initial_state):
@@ -177,7 +201,10 @@ with col1:
                         
                         final_state.update(state_update)
                 
-                if final_state and final_state.get("test_passed"):
+                success = bool(final_state and final_state.get("test_passed"))
+                run_metrics.end_run(success=success)
+
+                if success:
                     status.update(label="✅ Success! Issue Fixed.", state="complete")
                     st.success("Issue resolved and verified by automated tests!")
                     st.balloons()
@@ -188,6 +215,9 @@ with col1:
                         st.session_state.pr_step = "branching"
                 else:
                     status.update(label="❌ Failed after multiple attempts.", state="error")
+
+                # Store metrics in session state (scoped per-session, per-run)
+                st.session_state.run_metrics = run_metrics.to_dict()
 
     # --- HUMAN-IN-THE-LOOP DEPLOYMENT PIPELINE ---
     if st.session_state.get("final_state") and st.session_state.final_state.get("test_passed"):
@@ -276,17 +306,78 @@ with col1:
             st.success("✨ Deployment Complete. Awaiting human code review on GitHub.")
             if st.button("Start New Fix"):
                 # Clear session state to restart
-                for key in ["final_state", "pr_step", "branch_name"]:
+                for key in ["final_state", "pr_step", "branch_name", "run_metrics"]:
                     if key in st.session_state:
                         del st.session_state[key]
                 st.rerun()
 
 with col2:
-    st.markdown("### Agent Activity")
-    # Check session state or local variable
-    active_state = st.session_state.get("final_state") or (final_state if 'final_state' in locals() else None)
-    
-    if active_state:
+    st.markdown("### 📊 Run Metrics")
+
+    metrics_data = st.session_state.get("run_metrics")
+    active_state = st.session_state.get("final_state") or (
+        final_state if 'final_state' in locals() else None
+    )
+
+    if metrics_data:
+        # --- Overall status ---
+        if metrics_data["final_success"]:
+            st.success("✅ Run Succeeded")
+        else:
+            st.error("❌ Run Failed")
+
+        # --- Key numbers ---
+        m1, m2 = st.columns(2)
+        with m1:
+            st.metric(
+                "Total Duration",
+                f"{metrics_data['run_duration_ms'] / 1000:.1f}s",
+            )
+        with m2:
+            st.metric(
+                "Validation Attempts",
+                metrics_data["total_validation_attempts"],
+            )
+
+        m3, m4 = st.columns(2)
+        with m3:
+            st.metric("Total Tokens", f"{metrics_data['total_tokens']:,}")
+        with m4:
+            if cost_per_million > 0:
+                est_cost = (
+                    metrics_data["total_tokens"] / 1_000_000
+                ) * cost_per_million
+                st.metric("Est. Cost", f"${est_cost:.4f}")
+            else:
+                st.metric("Est. Cost", "N/A")
+
+        # --- Per-node breakdown ---
+        st.markdown("#### Per-Node Latency")
+        for node_name, node_data in metrics_data.get("nodes", {}).items():
+            icon = (
+                "📁" if node_name == "researcher"
+                else "💻" if node_name == "coder"
+                else "🧪"
+            )
+            status_icon = "✅" if node_data["all_succeeded"] else "❌"
+            st.markdown(
+                f"**{icon} {node_name.capitalize()}** {status_icon}  \n"
+                f"Executions: {node_data['executions']} · "
+                f"Avg: {node_data['avg_duration_ms'] / 1000:.1f}s · "
+                f"Total: {node_data['total_duration_ms'] / 1000:.1f}s"
+            )
+            if node_data["errors"]:
+                with st.expander(f"{node_name} errors"):
+                    for err in node_data["errors"]:
+                        st.warning(err)
+
+        # --- Test logs ---
+        if active_state and active_state.get("test_logs"):
+            with st.expander("Test Logs"):
+                st.code(active_state["test_logs"], language="bash")
+
+    elif active_state:
+        # Fallback for runs that happened before metrics were added
         st.info(f"Attempts: {active_state.get('validation_attempts', 0)}")
         if active_state.get("test_logs"):
             with st.expander("Test Results"):

@@ -22,9 +22,9 @@
 
 ---
 
-**Imagine this:** You paste a GitHub Issue link into a dashboard and sip your coffee. While you watch, an AI autonomously clones your repository, hunts down the exact file causing the bug, and writes the fix. But it doesn't stop there—it spins up an isolated Docker sandbox, runs your tests to prove the fix works, and automatically opens a Pull Request for your review. 
+**Ghost Coder** is an experimental autonomous agent that attempts to resolve GitHub issues end-to-end. You paste a GitHub Issue URL into a dashboard, and a team of AI agents collaborates to clone the repository, identify the relevant file, generate a patch, and run the generated tests inside an isolated Docker sandbox. If the tests pass, it opens a Pull Request for your review.
 
-That is **Ghost Coder**. It's not just a chat wrapper; it's a relentless, autonomous software engineer that handles the mundane debugging so you can focus on building.
+> **Note:** Ghost Coder is a research prototype. It works best on well-scoped, single-file bugs in Python repositories. It does not guarantee correctness — all patches are proposed as Pull Requests for human review. See [Limitations](#-limitations) below.
 
 ---
 
@@ -34,6 +34,9 @@ That is **Ghost Coder**. It's not just a chat wrapper; it's a relentless, autono
 - [🏗️ System Architecture](#-system-architecture)
 - [🛠️ Technology Stack](#-technology-stack)
 - [🌱 Env Variables](#-env-variables)
+- [🧪 Testing & Coverage](#-testing--coverage)
+- [📊 Observability](#-observability)
+- [⚠️ Limitations](#-limitations)
 - [👨‍💻 Developers & Troubleshooting](#-developers--troubleshooting)
 - [🙌 Contributing](#-contributing)
 - [📄 License](#-license)
@@ -75,28 +78,48 @@ Ghost Coder supports installation via [uv](https://github.com/astral-sh/uv) (rec
 
 ## 🏗️ System Architecture
 
-Ghost Coder is built on a modular, multi-agent state-machine architecture powered by **LangGraph**. The workflow acts as a living cycle where agents collaborate, test, and loop until a solution is mathematically validated.
+Ghost Coder is built on a modular, multi-agent state-machine architecture powered by **LangGraph**. The workflow runs a `Researcher → Coder → Tester` loop, retrying up to 3 times if tests fail.
 
 ```mermaid
-graph TD
-    Start((Start)) --> Researcher[Researcher Agent]
-    Researcher --> Coder[Coder Agent]
-    Coder --> Tester[Tester Agent]
-    Tester --> Sandbox{Docker Sandbox}
-    Sandbox -- Failure Feedback --> Coder
-    Sandbox -- Success --> PR[Human-in-the-Loop PR]
-    PR --> End((Finish))
+flowchart TD
+    Start((Start)) --> FetchIssue["Fetch Issue Details<br/><i>GitHub API</i>"]
+    FetchIssue --> CloneRepo["Clone Repository<br/><i>git clone</i>"]
+    CloneRepo --> Researcher
 
-    subgraph "Orchestration Layer (LangGraph)"
-    Researcher
-    Coder
-    Tester
+    subgraph "LangGraph State Machine"
+        direction TB
+        Researcher["🔍 Researcher Agent<br/><i>LLM: identify files to fix</i><br/>─────────<br/>Reads: issue_description, repo tree<br/>Writes: files_to_modify, research_summary"]
+        Coder["💻 Coder Agent<br/><i>LLM: generate SEARCH/REPLACE patch</i><br/>─────────<br/>Reads: files_to_modify, research_summary,<br/>test_explanation (on retry)<br/>Writes: updated_code, test_script"]
+        Tester["🧪 Tester Agent<br/><i>Syntax check + Docker sandbox</i><br/>─────────<br/>Reads: test_script, updated_code<br/>Writes: test_passed, test_logs,<br/>test_explanation, validation_attempts"]
+
+        Researcher --> Coder
+        Coder --> Tester
+        Tester -->|"test_passed=False AND<br/>attempts < 3"| Coder
     end
 
-    subgraph "Execution Environment"
-    Sandbox
+    Tester -->|"test_passed=True OR<br/>attempts >= 3"| Decision{Tests Passed?}
+
+    Decision -->|Yes| PR["Human-in-the-Loop<br/>PR Pipeline<br/><i>branch → commit → push → PR</i>"]
+    Decision -->|No| Fail["Report Failure"]
+
+    PR --> End((End))
+    Fail --> End
+
+    subgraph "Docker Sandbox (Isolated)"
+        direction TB
+        SandboxRun["Mount repo → Install deps →<br/>Run test_script<br/><i>python:3.11 container</i><br/>Timeout: 120s"]
     end
+
+    Tester -.->|"if syntax OK"| SandboxRun
+    SandboxRun -.->|"exit_code, logs"| Tester
 ```
+
+### Key Design Decisions
+
+- **Retry loop**: The `Tester → Coder` feedback loop runs up to 3 times. On retry, the Coder receives the Tester's failure explanation to guide its next attempt.
+- **Pre-flight syntax check**: Before spinning up a Docker container, the Tester runs `py_compile` on all modified files and the test script. This catches syntax errors instantly without the Docker overhead.
+- **Sandbox isolation**: All generated test scripts run inside a Docker container with the repo mounted at `/app`. The container installs project dependencies automatically from `requirements.txt` / `pyproject.toml`.
+- **SEARCH/REPLACE patching**: The Coder generates minimal diffs using a `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` format. If the LLM fails to produce valid blocks, it falls back to a full-file rewrite.
 
 ---
 
@@ -105,11 +128,12 @@ graph TD
 | Component           | Technology                       | Function                                    |
 | :------------------ | :------------------------------- | :------------------------------------------ |
 | **Brain**           | Groq (`llama-3.3-70b-versatile`) | High-speed reasoning and code generation    |
-| **Orchestration**   | LangGraph & LangChain            | Multi-agent state machine looping           |
-| **Frontend**        | Streamlit                        | Live, streaming agent-thought UI            |
-| **Sandbox**         | Docker SDK                       | Secure, dependency-aware code execution    |
+| **Orchestration**   | LangGraph & LangChain            | Multi-agent state machine with retry loop   |
+| **Frontend**        | Streamlit                        | Live agent-thought UI with metrics dashboard|
+| **Sandbox**         | Docker SDK                       | Isolated, dependency-aware code execution   |
 | **Version Control** | PyGithub & Git                   | Automated branch and Pull Request creation  |
-| **CI/CD**           | GitHub Actions                   | Automated Pytest validation & Docker builds |
+| **CI/CD**           | GitHub Actions                   | Pytest + coverage gate (80% on `src/`)      |
+| **Logging**         | Python `logging` (JSON format)   | Structured, machine-readable log output     |
 
 ---
 
@@ -124,12 +148,75 @@ The following environment variables are required for full functionality. You can
 
 ---
 
+## 🧪 Testing & Coverage
+
+The test suite covers unit tests for each agent node, parsing utilities, tools, and integration tests for the full LangGraph state machine.
+
+```bash
+# Run the full test suite with coverage report
+pytest tests/ -v --cov=src --cov-report=term-missing
+
+# Run only unit tests (fast, no Docker needed)
+pytest tests/ -v -k "not integration"
+
+# Run integration tests only
+pytest tests/ -v -k "integration"
+```
+
+### What's tested
+
+| Area | Tests | What's verified |
+|------|-------|-----------------|
+| **Researcher** | 6 tests | FILE: marker parsing, missing marker handling, LLM exceptions, token tracking |
+| **Coder** | 8 tests | SEARCH/REPLACE parsing & application, fallback rewrite, empty input, file-not-found, directory traversal, retry context |
+| **Tester** | 7 tests | No-script handling, syntax check, Docker success/failure, Docker unavailable, LLM explanation fallback |
+| **Graph Integration** | 8 tests | Full success path, retry-then-success (real graph transitions), max-retry exhaustion, `should_continue` routing |
+| **Docker Sandbox** | 6 tests | Success, timeout, unavailable, cleanup, image-not-found |
+| **GitHub Tools** | 9 tests | URL parsing (valid/malformed), file read (text/binary/missing), tree listing, issue fetch, clone |
+| **Metrics & Logging** | 10 tests | Latency recording, token tracking, JSON formatting, serialization |
+
+> **Coverage gate**: CI enforces ≥80% coverage on all code under `src/`. The current verified coverage is **93.24%** across all orchestration logic, agents, tools, and error-handling paths. See [ci.yml](.github/workflows/ci.yml).
+
+---
+
+## 📊 Observability
+
+### Structured Logging
+All internal logging uses Python's `logging` module with a JSON formatter. No `print()` statements remain in `src/`. Logs include:
+- Timestamped events per node (start, complete, error)
+- LLM token usage per call
+- Docker sandbox lifecycle events
+- Structured `extra` fields: `node`, `file_path`, `attempt`, `duration_ms`
+
+### Metrics Dashboard
+The Streamlit dashboard displays per-run metrics in the right panel:
+- **Total run duration** and **per-node latency** breakdown
+- **Validation attempts** count
+- **Total LLM tokens** consumed
+- **Estimated cost** (configurable `$/1M tokens` rate in sidebar)
+- **Per-node success/failure** with expandable error details
+
+Metrics are scoped per-run (fresh `RunMetrics` instance per orchestration call) and stored in Streamlit session state — no cross-session leakage.
+
+---
+
+## ⚠️ Limitations
+
+- **Single-file focus**: The Researcher typically identifies one file. Multi-file bugs may not be fully addressed.
+- **Python only**: The Docker sandbox runs `python test_fix.py`. Non-Python repos are not supported.
+- **LLM-dependent correctness**: Patches are generated by an LLM and may be incorrect, incomplete, or introduce new bugs. All patches are proposed as PRs for human review.
+- **No guarantee of fix quality**: The generated test script is also LLM-authored. A passing test does not prove the fix is correct — it proves the LLM's test passes against the LLM's patch.
+- **Docker required**: The Tester agent requires a running Docker daemon. Without Docker, only the pre-flight syntax check runs.
+- **Rate limits**: Groq API rate limits may cause retries or failures on rapid successive runs.
+- **Retry limit**: The system retries up to 3 times. Complex bugs may require more iterations or manual intervention.
+
+---
+
 ## 👨‍💻 Developers & Troubleshooting
 
 ### Running Tests
-To ensure the sandbox and core tools are functioning correctly, run the test suite:
 ```bash
-pytest tests/
+pytest tests/ -v --cov=src --cov-report=term-missing
 ```
 
 <details>
